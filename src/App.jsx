@@ -40,6 +40,30 @@ const ACTIONS = {
   exchange: { label: "Exchange", role: "Ambassador", gain: 0, cost: 0, challengeable: true, blockable: false },
 };
 
+// Plain-language help shown on the action menu and in prompts.
+const ACTION_HELP = {
+  income: { tag: "+1 coin", desc: "Take 1 coin. Always safe — nobody can stop it." },
+  foreignAid: { tag: "+2 coins", desc: "Take 2 coins. Anyone claiming the Duke can block it." },
+  tax: { tag: "+3 coins", desc: "Claim the Duke and take 3 coins. Can be challenged." },
+  steal: { tag: "+2 coins", desc: "Claim the Captain and steal up to 2 coins from a player." },
+  assassinate: { tag: "pay 3", desc: "Claim the Assassin: pay 3 to destroy one of a player's cards. Contessa blocks it." },
+  exchange: { tag: "swap", desc: "Claim the Ambassador: draw 2 cards and keep the ones you like best." },
+  coup: { tag: "pay 7", desc: "Pay 7 to destroy one of a player's cards. Cannot be blocked or challenged." },
+};
+const ACTION_ORDER = ["income", "foreignAid", "tax", "steal", "assassinate", "exchange", "coup"];
+
+// "<name> …" sentence describing what the actor is attempting, for everyone else.
+function describeAttempt(type, targetName) {
+  switch (type) {
+    case "foreignAid": return "wants to take Foreign Aid (+2 coins). Only a Duke can block it.";
+    case "tax": return "claims the Duke to take Tax (+3 coins).";
+    case "steal": return `claims the Captain to steal up to 2 coins from ${targetName}.`;
+    case "assassinate": return `pays 3 coins and claims the Assassin to destroy one of ${targetName}'s cards.`;
+    case "exchange": return "claims the Ambassador to swap cards with the deck.";
+    default: return `attempts ${ACTIONS[type]?.label || type}.`;
+  }
+}
+
 /* ---------------------------------------------------------------
    helpers
 --------------------------------------------------------------- */
@@ -331,7 +355,7 @@ async function saveRoom(room) {
 /* ---------------------------------------------------------------
    UI atoms
 --------------------------------------------------------------- */
-function Btn({ children, onClick, tone = "gold", disabled, small }) {
+function Btn({ children, onClick, tone = "gold", disabled, small, full }) {
   const tones = {
     gold: { bg: C.gold, fg: "#1B160E", border: C.gold },
     seal: { bg: C.seal, fg: C.parchment, border: C.sealBright },
@@ -342,7 +366,7 @@ function Btn({ children, onClick, tone = "gold", disabled, small }) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-md font-semibold transition-all ${small ? "px-3 py-1.5 text-sm" : "px-4 py-2 text-sm"}`}
+      className={`rounded-lg font-semibold transition-all ${small ? "px-3.5 py-2 text-sm" : "px-5 py-2.5 text-base"} ${full ? "w-full" : ""}`}
       style={{
         background: disabled ? "#3a352c" : s.bg,
         color: disabled ? "#8a8070" : s.fg,
@@ -350,6 +374,7 @@ function Btn({ children, onClick, tone = "gold", disabled, small }) {
         opacity: disabled ? 0.6 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
         letterSpacing: "0.02em",
+        minHeight: small ? 42 : 48,
       }}
       onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.filter = "brightness(1.12)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
@@ -359,38 +384,93 @@ function Btn({ children, onClick, tone = "gold", disabled, small }) {
   );
 }
 
+/* A tall option button with a title and an explanation underneath —
+   used for challenge / block / allow choices and target picking. */
+function ChoiceBtn({ title, sub, tone = "ghost", disabled, onClick, right }) {
+  const styles = {
+    gold: { bg: "#2a2416", border: C.gold, title: C.gold },
+    seal: { bg: "#2a1815", border: C.sealBright, title: "#E8A9A9" },
+    ghost: { bg: C.feltDark, border: C.panelLine, title: C.parchment },
+  };
+  const s = styles[tone];
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full text-left rounded-lg px-4 py-3"
+      style={{
+        background: disabled ? "#241f18" : s.bg,
+        border: `1px solid ${disabled ? C.panelLine : s.border}`,
+        opacity: disabled ? 0.45 : 1,
+        cursor: disabled ? "not-allowed" : "pointer",
+        minHeight: 52,
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span style={{ color: s.title, fontSize: 15, fontWeight: 700 }}>{title}</span>
+        {right && <span style={{ color: C.gold, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{right}</span>}
+      </div>
+      {sub && <div style={{ color: C.muted, fontSize: 12.5, marginTop: 2, lineHeight: 1.4 }}>{sub}</div>}
+    </button>
+  );
+}
+
 function CardTile({ role, revealed, faceDown, size = "md" }) {
-  const info = ROLE_INFO[role] || { color: C.muted };
-  const dims = size === "sm" ? "w-16 h-24 text-[10px]" : "w-24 h-36 text-xs";
+  const info = ROLE_INFO[role] || { color: C.muted, blurb: "" };
+  const d = size === "sm"
+    ? { w: 88, h: 128, name: 13, icon: 16, blurb: false }
+    : { w: 122, h: 178, name: 17, icon: 24, blurb: true };
   if (faceDown) {
     return (
       <div
-        className={`${dims} rounded-lg flex items-center justify-center shrink-0`}
+        className="rounded-xl flex items-center justify-center shrink-0"
         style={{
+          width: d.w,
+          height: d.h,
           background: `repeating-linear-gradient(135deg, ${C.panel}, ${C.panel} 6px, #2a241b 6px, #2a241b 12px)`,
           border: `1px solid ${C.panelLine}`,
         }}
       >
-        <Crown size={size === "sm" ? 14 : 20} color={C.goldDim} />
+        <Crown size={d.icon} color={C.goldDim} />
       </div>
     );
   }
   return (
     <div
-      className={`${dims} rounded-lg flex flex-col items-center justify-between p-2 shrink-0 relative`}
+      className="rounded-xl flex flex-col items-center p-2.5 shrink-0 relative text-center"
       style={{
-        background: revealed ? "#211a17" : `linear-gradient(160deg, ${info.color}22, ${C.panel})`,
-        border: `1px solid ${revealed ? C.panelLine : info.color}`,
+        width: d.w,
+        height: d.h,
+        background: revealed ? "#211a17" : `linear-gradient(160deg, ${info.color}2e, ${C.panel})`,
+        border: `1.5px solid ${revealed ? C.panelLine : info.color}`,
         opacity: revealed ? 0.55 : 1,
       }}
     >
-      <div className="w-full text-center font-bold" style={{ color: info.color, fontFamily: "'Playfair Display', serif", fontSize: size === "sm" ? 11 : 14 }}>
+      <div className="w-full font-bold" style={{ color: info.color, fontFamily: "'Playfair Display', serif", fontSize: d.name, lineHeight: 1.15 }}>
         {role}
       </div>
-      <Swords size={size === "sm" ? 14 : 20} color={info.color} style={{ opacity: 0.8 }} />
+      <div className="flex-1 flex items-center">
+        <Swords size={d.icon} color={info.color} style={{ opacity: 0.8 }} />
+      </div>
+      {d.blurb && (
+        <p style={{ color: C.parchment, fontSize: 10.5, lineHeight: 1.35, opacity: 0.85 }}>{info.blurb}</p>
+      )}
       {revealed && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span style={{ color: C.seal, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em" }}>REVEALED</span>
+        <div className="absolute inset-0 flex items-center justify-center rounded-xl" style={{ background: "#15130Fb8" }}>
+          <span
+            style={{
+              color: C.sealBright,
+              fontSize: 13,
+              fontWeight: 800,
+              letterSpacing: "0.12em",
+              border: `2px solid ${C.sealBright}`,
+              borderRadius: 6,
+              padding: "3px 10px",
+              transform: "rotate(-12deg)",
+            }}
+          >
+            OUT
+          </span>
         </div>
       )}
     </div>
@@ -408,17 +488,21 @@ function PlayerBadge({ p, isMe, isTurn, isTarget }) {
         opacity: alive ? 1 : 0.45,
       }}
     >
-      <div className="flex flex-col">
-        <span style={{ color: C.parchment, fontWeight: 600, fontSize: 13 }}>
-          {p.name}{isMe ? " (you)" : ""}{!alive ? " · out" : ""}
+      <div className="flex flex-col min-w-0">
+        <span className="flex items-center gap-1 truncate" style={{ color: C.parchment, fontWeight: 600, fontSize: 14 }}>
+          {isTurn && <Crown size={13} color={C.gold} className="shrink-0" />}
+          <span className="truncate">{p.name}{isMe ? " (you)" : ""}{!alive ? " · out" : ""}</span>
         </span>
-        <span className="flex items-center gap-1" style={{ color: C.gold, fontSize: 12 }}>
-          <Coins size={11} /> {p.coins}
+        <span className="flex items-center gap-1" style={{ color: C.gold, fontSize: 13 }}>
+          <Coins size={12} /> {p.coins}
+          <span style={{ color: C.muted, fontSize: 12 }} className="ml-1.5">
+            {p.hand.filter((c) => !c.revealed).length} card{p.hand.filter((c) => !c.revealed).length === 1 ? "" : "s"}
+          </span>
         </span>
       </div>
-      <div className="flex gap-1 ml-1">
+      <div className="flex gap-1 ml-auto">
         {p.hand.map((c, i) => (
-          <div key={i} className="w-2.5 h-4 rounded-sm" style={{ background: c.revealed ? "#4a4436" : C.gold, opacity: c.revealed ? 0.4 : 1 }} />
+          <div key={i} className="w-3 h-5 rounded-sm" style={{ background: c.revealed ? "#4a4436" : C.gold, opacity: c.revealed ? 0.4 : 1 }} />
         ))}
       </div>
     </div>
@@ -551,11 +635,11 @@ export default function App() {
               onChange={(e) => { setName(e.target.value); setError(""); }}
               placeholder="e.g. Duchess Marlowe"
               maxLength={18}
-              className="w-full rounded-md px-3 py-2 mb-4 outline-none"
-              style={{ background: C.feltDark, color: C.parchment, border: `1px solid ${C.panelLine}` }}
+              className="w-full rounded-md px-3 py-2.5 mb-4 outline-none"
+              style={{ background: C.feltDark, color: C.parchment, border: `1px solid ${C.panelLine}`, fontSize: 16 }}
             />
 
-            <Btn onClick={handleCreate} disabled={busy}>Create a room</Btn>
+            <Btn onClick={handleCreate} disabled={busy} full>Create a room</Btn>
 
             <div className="flex items-center gap-2 my-4">
               <div className="h-px flex-1" style={{ background: C.panelLine }} />
@@ -569,15 +653,26 @@ export default function App() {
               onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setError(""); }}
               placeholder="ABCD"
               maxLength={4}
-              className="w-full rounded-md px-3 py-2 mb-3 outline-none tracking-[0.3em] text-center font-bold"
-              style={{ background: C.feltDark, color: C.gold, border: `1px solid ${C.panelLine}` }}
+              className="w-full rounded-md px-3 py-2.5 mb-3 outline-none tracking-[0.3em] text-center font-bold"
+              style={{ background: C.feltDark, color: C.gold, border: `1px solid ${C.panelLine}`, fontSize: 18 }}
             />
-            <Btn onClick={handleJoin} tone="ghost" disabled={busy}>Join room</Btn>
+            <Btn onClick={handleJoin} tone="ghost" disabled={busy} full>Join room</Btn>
           </div>
 
           {error && (
-            <div className="text-center rounded-md py-2 px-3" style={{ background: "#3a1c1c", color: "#e0a0a0", fontSize: 13 }}>{error}</div>
+            <div className="text-center rounded-md py-2 px-3 mb-4" style={{ background: "#3a1c1c", color: "#e0a0a0", fontSize: 13 }}>{error}</div>
           )}
+
+          <details className="rounded-xl px-4 py-3" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+            <summary style={{ color: C.gold, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>New here? How to play</summary>
+            <ul className="mt-2 flex flex-col gap-2" style={{ color: C.muted, fontSize: 13.5, lineHeight: 1.5, paddingLeft: 18, listStyle: "disc" }}>
+              <li>You start with <b style={{ color: C.parchment }}>2 secret cards</b> and 2 coins. Lose both cards and you're out.</li>
+              <li>On your turn, pick one action — earn coins or attack. Many actions belong to a role card, but <b style={{ color: C.parchment }}>you're allowed to bluff</b> about which cards you hold.</li>
+              <li>Think someone is bluffing? <b style={{ color: C.parchment }}>Challenge</b> them. Whoever turns out to be wrong gives up a card.</li>
+              <li>Save up 7 coins to launch a <b style={{ color: C.parchment }}>Coup</b> — it destroys a card and nothing can stop it.</li>
+              <li><b style={{ color: C.parchment }}>Last player with a card wins.</b></li>
+            </ul>
+          </details>
         </div>
       </div>
     );
@@ -616,7 +711,7 @@ export default function App() {
           </div>
 
           {isHost ? (
-            <Btn onClick={handleStart} disabled={room.players.length < 2}>
+            <Btn onClick={handleStart} disabled={room.players.length < 2} full>
               {room.players.length < 2 ? "Waiting for more players…" : "Start the game"}
             </Btn>
           ) : (
@@ -694,87 +789,146 @@ export default function App() {
 
             {/* table log */}
             <div className="rounded-xl p-3 mb-4 h-28 overflow-y-auto" style={{ background: "#0f0d0a", border: `1px solid ${C.panelLine}` }}>
-              {(room.log || []).slice(-8).map((l, i) => (
-                <p key={i} style={{ color: C.muted, fontSize: 12.5 }} className="mb-1">{l}</p>
+              {(room.log || []).slice(-8).map((l, i, arr) => (
+                <p key={i} style={{ color: i === arr.length - 1 ? C.parchment : C.muted, fontSize: 13 }} className="mb-1">{l}</p>
               ))}
             </div>
 
             {/* status / prompts */}
             <div className="rounded-xl p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-              {t.phase === "idle" && (
-                <p className="text-center" style={{ color: myTurn ? C.gold : C.muted, fontSize: 14, fontWeight: 600 }}>
-                  {myTurn ? "Your move." : `Waiting on ${currentPlayer?.name}…`}
+              {t.phase === "idle" && !pendingAction && (
+                <p className="text-center" style={{ color: myTurn ? C.gold : C.muted, fontSize: 16, fontWeight: 700 }}>
+                  {myTurn ? "Your turn — pick an action below." : `Waiting for ${currentPlayer?.name} to move…`}
                 </p>
               )}
 
               {pendingAction && (
-                <p className="text-center mb-2" style={{ color: C.gold, fontSize: 13 }}>Choose a target for {ACTIONS[pendingAction].label}</p>
+                <div>
+                  <p className="text-center mb-3" style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>
+                    {ACTIONS[pendingAction].label}: who's the target?
+                  </p>
+                  <div className="flex flex-col gap-2 mb-2">
+                    {otherAlive(room, myId).map((p) => (
+                      <ChoiceBtn
+                        key={p.id}
+                        tone="seal"
+                        title={p.name}
+                        right={`${p.coins} coins`}
+                        sub={`${p.hand.filter((c) => !c.revealed).length} card${p.hand.filter((c) => !c.revealed).length === 1 ? "" : "s"} left`}
+                        onClick={() => chooseTarget(p.id)}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-center">
+                    <button onClick={() => setPendingAction(null)} className="px-4 py-2" style={{ color: C.muted, fontSize: 14, cursor: "pointer" }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               )}
 
-              {t.phase === "action-pending" && (
-                <div>
-                  <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 13 }}>
-                    {room.players.find((p) => p.id === t.action.actorId)?.name} is attempting <b style={{ color: C.gold }}>{ACTIONS[t.action.type].label}</b>
-                    {t.action.targetId ? ` on ${room.players.find((p) => p.id === t.action.targetId)?.name}` : ""}.
-                  </p>
-                  {!iAmActor && myResponse === "pending" && isAlive(me) ? (
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {ACTIONS[t.action.type].challengeable && (
-                        <Btn tone="seal" small onClick={() => refresh((r) => respondToAction(r, myId, "challenge"))}>
-                          <span className="flex items-center gap-1"><ShieldAlert size={13} /> Challenge</span>
-                        </Btn>
-                      )}
-                      {ACTIONS[t.action.type].blockable && ACTIONS[t.action.type].blockRoles
-                        .filter((role) => t.action.type !== "steal" || true)
-                        .map((role) => (
-                        <Btn key={role} tone="ghost" small onClick={() => refresh((r) => respondToAction(r, myId, "block", role))}>
-                          Block ({role})
-                        </Btn>
-                      ))}
-                      <Btn tone="gold" small onClick={() => refresh((r) => respondToAction(r, myId, "pass"))}>Allow</Btn>
-                    </div>
-                  ) : (
-                    <p className="text-center" style={{ color: C.muted, fontSize: 12 }}>
-                      {isAlive(me) ? "Waiting on other players…" : "You're out of the game."}
+              {t.phase === "action-pending" && (() => {
+                const actorName = room.players.find((p) => p.id === t.action.actorId)?.name;
+                const targetName = t.action.targetId ? room.players.find((p) => p.id === t.action.targetId)?.name : null;
+                const claimedRole = ACTIONS[t.action.type].role;
+                const waitingNames = Object.entries(t.responses || {})
+                  .filter(([, v]) => v === "pending")
+                  .map(([id]) => room.players.find((p) => p.id === id)?.name)
+                  .filter(Boolean);
+                return (
+                  <div>
+                    <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 14.5, lineHeight: 1.5 }}>
+                      <b style={{ color: C.gold }}>{actorName}</b> {describeAttempt(t.action.type, targetName)}
                     </p>
-                  )}
-                </div>
-              )}
+                    {!iAmActor && myResponse === "pending" && isAlive(me) ? (
+                      <div className="flex flex-col gap-2 max-w-md mx-auto">
+                        {ACTIONS[t.action.type].challengeable && (
+                          <ChoiceBtn
+                            tone="seal"
+                            title="Challenge — call the bluff"
+                            sub={`If ${actorName} can't show the ${claimedRole}, they lose a card. But if they CAN, you lose one.`}
+                            onClick={() => refresh((r) => respondToAction(r, myId, "challenge"))}
+                          />
+                        )}
+                        {ACTIONS[t.action.type].blockable && ACTIONS[t.action.type].blockRoles.map((role) => (
+                          <ChoiceBtn
+                            key={role}
+                            tone="ghost"
+                            title={`Block as ${role}`}
+                            sub={`Claim the ${role} to stop this action. You may bluff — but you can be challenged.`}
+                            onClick={() => refresh((r) => respondToAction(r, myId, "block", role))}
+                          />
+                        ))}
+                        <ChoiceBtn
+                          tone="gold"
+                          title="Allow it"
+                          sub="Let the action happen."
+                          onClick={() => refresh((r) => respondToAction(r, myId, "pass"))}
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
+                        {!isAlive(me)
+                          ? "You're out of the game — spectating."
+                          : waitingNames.length
+                            ? `Waiting for ${waitingNames.join(", ")} to respond…`
+                            : "Waiting…"}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
-              {t.phase === "block-pending" && (
-                <div>
-                  <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 13 }}>
-                    {room.players.find((p) => p.id === t.block.by)?.name} claims <b style={{ color: C.gold }}>{t.block.role}</b> to block.
-                  </p>
-                  {iAmActor ? (
-                    <div className="flex gap-2 justify-center">
-                      <Btn tone="seal" small onClick={() => refresh((r) => respondToBlock(r, myId, "challenge"))}>
-                        <span className="flex items-center gap-1"><ShieldAlert size={13} /> Challenge block</span>
-                      </Btn>
-                      <Btn tone="gold" small onClick={() => refresh((r) => respondToBlock(r, myId, "accept"))}>Accept block</Btn>
-                    </div>
-                  ) : (
-                    <p className="text-center" style={{ color: C.muted, fontSize: 12 }}>Waiting on {room.players.find(p=>p.id===t.action.actorId)?.name}…</p>
-                  )}
-                </div>
-              )}
+              {t.phase === "block-pending" && (() => {
+                const blockerName = room.players.find((p) => p.id === t.block.by)?.name;
+                return (
+                  <div>
+                    <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 14.5, lineHeight: 1.5 }}>
+                      <b style={{ color: C.gold }}>{blockerName}</b> claims the <b style={{ color: C.gold }}>{t.block.role}</b> to block your {ACTIONS[t.action.type].label}. Do you believe them?
+                    </p>
+                    {iAmActor ? (
+                      <div className="flex flex-col gap-2 max-w-md mx-auto">
+                        <ChoiceBtn
+                          tone="seal"
+                          title="Challenge the block — call the bluff"
+                          sub={`If ${blockerName} can't show the ${t.block.role}, they lose a card and your action goes through. If they can, you lose one.`}
+                          onClick={() => refresh((r) => respondToBlock(r, myId, "challenge"))}
+                        />
+                        <ChoiceBtn
+                          tone="gold"
+                          title="Accept the block"
+                          sub="Back down — your action is stopped."
+                          onClick={() => refresh((r) => respondToBlock(r, myId, "accept"))}
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
+                        Waiting for {room.players.find((p) => p.id === t.action.actorId)?.name} to respond to the block…
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {t.phase === "lose-influence" && (
                 <div>
                   {t.pendingLoss.includes(myId) ? (
                     <div>
-                      <p className="text-center mb-3" style={{ color: C.seal, fontSize: 13, fontWeight: 600 }}>Choose an influence to reveal and lose.</p>
-                      <div className="flex gap-3 justify-center">
+                      <p className="text-center mb-1" style={{ color: C.sealBright, fontSize: 15, fontWeight: 700 }}>You must give up a card!</p>
+                      <p className="text-center mb-3" style={{ color: C.muted, fontSize: 13 }}>
+                        Tap the card to sacrifice — it's revealed to everyone and out of the game.
+                      </p>
+                      <div className="flex gap-3 justify-center flex-wrap">
                         {me.hand.map((c, i) => !c.revealed && (
-                          <div key={i} onClick={() => refresh((r) => pickLoseCard(r, myId, i))} className="cursor-pointer">
+                          <div key={i} onClick={() => refresh((r) => pickLoseCard(r, myId, i))} className="cursor-pointer active:scale-95 transition-transform">
                             <CardTile role={c.role} revealed={false} />
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <p className="text-center" style={{ color: C.muted, fontSize: 12 }}>
-                      Waiting on {room.players.find((p) => t.pendingLoss.includes(p.id))?.name} to lose an influence…
+                    <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
+                      Waiting for {room.players.find((p) => t.pendingLoss.includes(p.id))?.name} to give up a card…
                     </p>
                   )}
                 </div>
@@ -799,31 +953,52 @@ export default function App() {
 
             {/* my hand + actions */}
             <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-              <div className="flex items-center justify-between mb-3">
-                <span className="flex items-center gap-1" style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}><Coins size={15} /> {me?.coins ?? 0} coins</span>
-                <span style={{ color: C.muted, fontSize: 12 }}>{isAlive(me) ? "" : "You're out — spectating"}</span>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                <span className="flex items-center gap-1.5" style={{ color: C.parchment, fontSize: 14, fontWeight: 700 }}>
+                  <Eye size={14} color={C.muted} /> Your secret cards
+                </span>
+                <span className="flex items-center gap-1" style={{ color: C.gold, fontSize: 16, fontWeight: 700 }}>
+                  <Coins size={16} /> {me?.coins ?? 0} coins
+                </span>
               </div>
-              <div className="flex gap-2 mb-4">
-                {me?.hand.map((c, i) => <CardTile key={i} role={c.role} revealed={c.revealed} size="sm" />)}
+              <p className="mb-3" style={{ color: C.muted, fontSize: 12.5 }}>
+                {isAlive(me) ? "Only you can see these. Losing both means you're out." : "You're out — spectating."}
+              </p>
+              <div className="flex gap-3 mb-4 flex-wrap justify-center sm:justify-start">
+                {me?.hand.map((c, i) => <CardTile key={i} role={c.role} revealed={c.revealed} />)}
               </div>
 
-              {myTurn && t.phase === "idle" && isAlive(me) && (
+              {myTurn && t.phase === "idle" && isAlive(me) && !pendingAction && (
                 <div>
                   {me.coins >= 10 ? (
-                    <p className="mb-2 text-center" style={{ color: C.seal, fontSize: 12 }}>10+ coins — you must Coup.</p>
-                  ) : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Btn small onClick={() => doAction("income")} disabled={me.coins >= 10}>Income (+1)</Btn>
-                    <Btn small tone="ghost" onClick={() => doAction("foreignAid")} disabled={me.coins >= 10}>Foreign Aid (+2)</Btn>
-                    <Btn small tone="seal" onClick={() => setPendingAction("coup")} disabled={me.coins < 7}>Coup (-7)</Btn>
-                    <Btn small tone="ghost" onClick={() => doAction("tax")} disabled={me.coins >= 10}>Tax · Duke (+3)</Btn>
-                    <Btn small tone="seal" onClick={() => setPendingAction("assassinate")} disabled={me.coins < 3 || me.coins >= 10}>Assassinate · 3</Btn>
-                    <Btn small tone="ghost" onClick={() => setPendingAction("steal")} disabled={me.coins >= 10}>Steal · Captain</Btn>
-                    <Btn small tone="ghost" onClick={() => doAction("exchange")} disabled={me.coins >= 10}>Exchange · Ambassador</Btn>
-                  </div>
-                  {pendingAction && (
-                    <p className="mt-2 text-center" style={{ color: C.gold, fontSize: 12 }}>Tap a player above to target them.</p>
+                    <p className="mb-2 text-center" style={{ color: C.sealBright, fontSize: 13, fontWeight: 600 }}>
+                      You have 10+ coins — the rules say you must launch a Coup.
+                    </p>
+                  ) : (
+                    <p className="mb-2" style={{ color: C.muted, fontSize: 12.5 }}>
+                      Pick one action. Actions naming a role need that card — <b style={{ color: C.parchment }}>bluffing is allowed</b>.
+                    </p>
                   )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {ACTION_ORDER.map((type) => {
+                      const def = ACTIONS[type];
+                      const help = ACTION_HELP[type];
+                      const mustCoup = me.coins >= 10;
+                      const disabled = mustCoup ? type !== "coup" : def.cost > me.coins;
+                      const aggressive = type === "coup" || type === "assassinate";
+                      return (
+                        <ChoiceBtn
+                          key={type}
+                          tone={aggressive ? "seal" : def.role ? "ghost" : "gold"}
+                          title={def.role ? `${def.label} · ${def.role}` : def.label}
+                          right={help.tag}
+                          sub={help.desc}
+                          disabled={disabled}
+                          onClick={() => doAction(type)}
+                        />
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -856,7 +1031,12 @@ function ExchangePicker({ hand, drawn, onConfirm }) {
   }
   return (
     <div>
-      <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 13 }}>Pick {keepCount} card{keepCount > 1 ? "s" : ""} to keep.</p>
+      <p className="text-center mb-1" style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>
+        Pick {keepCount} card{keepCount > 1 ? "s" : ""} to keep
+      </p>
+      <p className="text-center mb-3" style={{ color: C.muted, fontSize: 13 }}>
+        You drew {drawn.length} new card{drawn.length > 1 ? "s" : ""}. The rest go back into the deck — nobody sees them.
+      </p>
       <div className="flex gap-2 justify-center flex-wrap mb-3">
         {pool.map((role, i) => (
           <div key={i} onClick={() => toggle(i)} className="cursor-pointer relative">
