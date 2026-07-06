@@ -30,24 +30,29 @@ The repo ships a `vercel.json` and is a standard Vite app.
 ### Enable cross-device multiplayer (Redis)
 
 For friends on **other devices** to join a room, the deployment needs a shared store. The app talks
-to a serverless endpoint (`api/kv.js`) backed by any standard **Redis** database.
+to a serverless endpoint (`api/kv.js`) that auto-detects **either** kind of Redis credentials — no
+code changes needed, just set env vars in **Settings → Environment Variables** and redeploy.
 
-1. Add a `REDIS_URL` environment variable to the Vercel project (**Settings → Environment
-   Variables**) with your Redis connection string:
+**Option 1 — Upstash / Vercel KV (HTTP REST).** If you added the Upstash Redis or Vercel KV
+integration, these are set for you automatically:
 
-   ```
-   redis://default:<password>@<host>:<port>
-   rediss://default:<password>@<host>:<port>   # use rediss:// for TLS
-   ```
+```
+UPSTASH_REDIS_REST_URL   (or KV_REST_API_URL)
+UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_TOKEN)
+```
 
-   Your Redis must be reachable from Vercel's servers (i.e. a publicly accessible / managed Redis,
-   not one bound to localhost or a private network).
-2. Redeploy. That's it — no code changes needed.
+**Option 2 — a plain Redis connection string.** Point it at any managed Redis over the Redis
+protocol:
 
-Already using Vercel KV / Upstash? It exposes the same kind of connection string as `KV_URL`, and
-the endpoint reads that too — so `REDIS_URL` **or** `KV_URL` works.
+```
+REDIS_URL=redis://default:<password>@<host>:<port>
+REDIS_URL=rediss://default:<password>@<host>:<port>   # rediss:// for TLS
+```
 
-If neither is set, the endpoint returns `501` and the app **automatically falls back to
+Your Redis must be reachable from Vercel's servers (a publicly accessible / managed Redis, not one
+bound to localhost or a private network).
+
+If **neither** is set, the endpoint returns `501` and the app **automatically falls back to
 `localStorage`**, so it still runs — but rooms are then only visible within a single browser.
 
 ## Multiplayer & storage
