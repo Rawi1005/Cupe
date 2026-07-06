@@ -384,6 +384,103 @@ function Btn({ children, onClick, tone = "gold", disabled, small, full }) {
   );
 }
 
+/* A simple ring spinner. */
+function Spinner({ size = 18, color = C.gold, stroke = 2.5 }) {
+  return (
+    <span
+      className="inline-block shrink-0"
+      style={{
+        width: size,
+        height: size,
+        border: `${stroke}px solid ${color}33`,
+        borderTopColor: color,
+        borderRadius: "50%",
+        animation: "coup-spin 0.7s linear infinite",
+      }}
+    />
+  );
+}
+
+/* Three bouncing dots — a lightweight "someone is thinking" cue. */
+function Dots({ color = C.muted }) {
+  return (
+    <span className="inline-flex items-end gap-1" style={{ height: 8 }}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: "50%",
+            background: color,
+            animation: `coup-dot 1.2s ease-in-out ${i * 0.16}s infinite`,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/* A clear "waiting for someone" panel: spinner + message + dots. */
+function Waiting({ children, spectating }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 py-1 coup-rise">
+      {!spectating && <Spinner size={22} />}
+      <p className="flex items-center gap-1.5 text-center" style={{ color: C.muted, fontSize: 13.5 }}>
+        <span>{children}</span>
+        {!spectating && <Dots />}
+      </p>
+    </div>
+  );
+}
+
+/* Big game-show style banner that drops in for each new table event so
+   nobody misses what just happened. Reads the latest log line. */
+function announcementStyle(text) {
+  const t = text.toLowerCase();
+  if (/wins|rules the table/.test(t)) return { Icon: Crown, color: C.gold, big: true };
+  if (/challenge/.test(t)) return { Icon: ShieldAlert, color: C.sealBright, big: true };
+  if (/reveals|coup|assassin/.test(t)) return { Icon: Skull, color: C.sealBright, big: false };
+  if (/steal/.test(t)) return { Icon: Coins, color: C.steel, big: false };
+  if (/tax|foreign aid|income|exchange|draws/.test(t)) return { Icon: Coins, color: C.gold, big: false };
+  if (/block/.test(t)) return { Icon: ShieldAlert, color: C.moss, big: false };
+  return { Icon: Swords, color: C.gold, big: false };
+}
+
+function Announcer({ event }) {
+  if (!event) return null;
+  const { Icon, color, big } = announcementStyle(event.text);
+  return (
+    <div className="fixed left-1/2 z-50 px-4 w-full pointer-events-none" style={{ top: "max(14px, env(safe-area-inset-top))", maxWidth: 620 }}>
+      <div
+        key={event.id}
+        className="mx-auto flex items-center gap-3 rounded-xl px-4 py-3 shadow-xl"
+        style={{
+          background: "linear-gradient(180deg, #2a2416, #1c1810)",
+          border: `1.5px solid ${color}`,
+          boxShadow: `0 10px 30px #000000aa, 0 0 0 1px ${color}22`,
+          animation: "coup-announce 3.6s cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        }}
+      >
+        <div className="shrink-0 rounded-full flex items-center justify-center" style={{ width: 38, height: 38, background: `${color}22`, border: `1px solid ${color}55` }}>
+          <Icon size={20} color={color} />
+        </div>
+        <span
+          style={{
+            color: C.parchment,
+            fontFamily: big ? "'Playfair Display', serif" : "'Inter', sans-serif",
+            fontSize: big ? 19 : 16,
+            fontWeight: big ? 700 : 600,
+            lineHeight: 1.25,
+          }}
+        >
+          {event.text}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* A tall option button with a title and an explanation underneath —
    used for challenge / block / allow choices and target picking. */
 function ChoiceBtn({ title, sub, tone = "ghost", disabled, onClick, right }) {
@@ -481,7 +578,7 @@ function PlayerBadge({ p, isMe, isTurn, isTarget }) {
   const alive = isAlive(p);
   return (
     <div
-      className="rounded-lg px-3 py-2 flex items-center gap-2"
+      className={`rounded-lg px-3 py-2 flex items-center gap-2 ${isTurn && alive ? "coup-turn-glow" : ""} ${isTarget ? "coup-pop" : ""}`}
       style={{
         background: isTurn ? "#2a2416" : C.panel,
         border: `1px solid ${isTurn ? C.gold : isTarget ? C.seal : C.panelLine}`,
@@ -524,8 +621,31 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState(null);
   const [exchangeKeep, setExchangeKeep] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [announce, setAnnounce] = useState(null); // { text, id }
   const pollRef = useRef(null);
   const codeRef = useRef(null);
+  const lastLogRef = useRef(null);
+
+  // Announce each new log line as a big banner. The first line we see for
+  // a room just primes the ref (no banner for history when you join).
+  useEffect(() => {
+    if (!room || (room.status !== "playing" && room.status !== "finished")) return;
+    const lines = room.log || [];
+    const last = lines.length ? lines[lines.length - 1] : null;
+    if (last == null) return;
+    if (lastLogRef.current === null) { lastLogRef.current = last; return; }
+    if (last !== lastLogRef.current) {
+      lastLogRef.current = last;
+      setAnnounce({ text: last, id: Date.now() + Math.random() });
+    }
+  }, [room?.log, room?.status]);
+
+  // Auto-dismiss the banner after its animation finishes.
+  useEffect(() => {
+    if (!announce) return;
+    const timer = setTimeout(() => setAnnounce((a) => (a && a.id === announce.id ? null : a)), 3600);
+    return () => clearTimeout(timer);
+  }, [announce?.id]);
 
   // restore identity for a room on load
   useEffect(() => {
@@ -607,6 +727,8 @@ export default function App() {
 
   function leaveRoom() {
     clearInterval(pollRef.current);
+    lastLogRef.current = null;
+    setAnnounce(null);
     setScreen("home");
     setRoom(null);
     setMyId(null);
@@ -639,7 +761,9 @@ export default function App() {
               style={{ background: C.feltDark, color: C.parchment, border: `1px solid ${C.panelLine}`, fontSize: 16 }}
             />
 
-            <Btn onClick={handleCreate} disabled={busy} full>Create a room</Btn>
+            <Btn onClick={handleCreate} disabled={busy} full>
+              {busy ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color="#1B160E" /> Creating…</span> : "Create a room"}
+            </Btn>
 
             <div className="flex items-center gap-2 my-4">
               <div className="h-px flex-1" style={{ background: C.panelLine }} />
@@ -656,7 +780,9 @@ export default function App() {
               className="w-full rounded-md px-3 py-2.5 mb-3 outline-none tracking-[0.3em] text-center font-bold"
               style={{ background: C.feltDark, color: C.gold, border: `1px solid ${C.panelLine}`, fontSize: 18 }}
             />
-            <Btn onClick={handleJoin} tone="ghost" disabled={busy} full>Join room</Btn>
+            <Btn onClick={handleJoin} tone="ghost" disabled={busy} full>
+              {busy ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color={C.parchment} /> Joining…</span> : "Join room"}
+            </Btn>
           </div>
 
           {error && (
@@ -715,7 +841,7 @@ export default function App() {
               {room.players.length < 2 ? "Waiting for more players…" : "Start the game"}
             </Btn>
           ) : (
-            <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>Waiting for the host to start…</p>
+            <Waiting>Waiting for the host to start the game</Waiting>
           )}
           <div className="mt-3 text-center">
             <button onClick={leaveRoom} className="inline-flex items-center gap-1" style={{ color: C.muted, fontSize: 12 }}>
@@ -757,6 +883,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full p-4 md:p-6" style={{ background: `radial-gradient(ellipse at top, ${C.felt}, ${C.feltDark})`, fontFamily: "'Inter', sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');`}</style>
+      <Announcer event={announce} />
 
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-4">
@@ -794,12 +921,16 @@ export default function App() {
               ))}
             </div>
 
-            {/* status / prompts */}
-            <div className="rounded-xl p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+            {/* status / prompts — keyed so content animates in on each phase change */}
+            <div key={`${t.phase}:${t.action?.type || ""}:${t.block?.by || ""}:${pendingAction || ""}`} className="rounded-xl p-4 mb-4 coup-rise" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
               {t.phase === "idle" && !pendingAction && (
-                <p className="text-center" style={{ color: myTurn ? C.gold : C.muted, fontSize: 16, fontWeight: 700 }}>
-                  {myTurn ? "Your turn — pick an action below." : `Waiting for ${currentPlayer?.name} to move…`}
-                </p>
+                myTurn ? (
+                  <p className="text-center" style={{ color: C.gold, fontSize: 16, fontWeight: 700 }}>
+                    Your turn — pick an action below.
+                  </p>
+                ) : (
+                  <Waiting>Waiting for {currentPlayer?.name} to move</Waiting>
+                )
               )}
 
               {pendingAction && (
@@ -866,14 +997,14 @@ export default function App() {
                           onClick={() => refresh((r) => respondToAction(r, myId, "pass"))}
                         />
                       </div>
+                    ) : !isAlive(me) ? (
+                      <Waiting spectating>You're out of the game — spectating.</Waiting>
+                    ) : iAmActor ? (
+                      <Waiting>
+                        Waiting to see if anyone challenges or blocks{waitingNames.length ? ` (${waitingNames.join(", ")})` : ""}
+                      </Waiting>
                     ) : (
-                      <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
-                        {!isAlive(me)
-                          ? "You're out of the game — spectating."
-                          : waitingNames.length
-                            ? `Waiting for ${waitingNames.join(", ")} to respond…`
-                            : "Waiting…"}
-                      </p>
+                      <Waiting>You allowed it — waiting for {waitingNames.join(", ") || "others"}</Waiting>
                     )}
                   </div>
                 );
@@ -902,9 +1033,9 @@ export default function App() {
                         />
                       </div>
                     ) : (
-                      <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
-                        Waiting for {room.players.find((p) => p.id === t.action.actorId)?.name} to respond to the block…
-                      </p>
+                      <Waiting>
+                        Waiting for {room.players.find((p) => p.id === t.action.actorId)?.name} to accept or challenge the block
+                      </Waiting>
                     )}
                   </div>
                 );
@@ -927,9 +1058,9 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-center" style={{ color: C.muted, fontSize: 13 }}>
-                      Waiting for {room.players.find((p) => t.pendingLoss.includes(p.id))?.name} to give up a card…
-                    </p>
+                    <Waiting>
+                      Waiting for {room.players.find((p) => t.pendingLoss.includes(p.id))?.name} to give up a card
+                    </Waiting>
                   )}
                 </div>
               )}
@@ -943,9 +1074,9 @@ export default function App() {
                       onConfirm={(keep) => refresh((r) => completeExchange(r, myId, keep))}
                     />
                   ) : (
-                    <p className="text-center" style={{ color: C.muted, fontSize: 12 }}>
-                      {room.players.find((p) => p.id === t.actorId)?.name} is choosing new influence…
-                    </p>
+                    <Waiting>
+                      {room.players.find((p) => p.id === t.actorId)?.name} is choosing new cards
+                    </Waiting>
                   )}
                 </div>
               )}
@@ -965,7 +1096,11 @@ export default function App() {
                 {isAlive(me) ? "Only you can see these. Losing both means you're out." : "You're out — spectating."}
               </p>
               <div className="flex gap-3 mb-4 flex-wrap justify-center sm:justify-start">
-                {me?.hand.map((c, i) => <CardTile key={i} role={c.role} revealed={c.revealed} />)}
+                {me?.hand.map((c, i) => (
+                  <div key={i} className="coup-pop" style={{ animationDelay: `${i * 0.08}s` }}>
+                    <CardTile role={c.role} revealed={c.revealed} />
+                  </div>
+                ))}
               </div>
 
               {myTurn && t.phase === "idle" && isAlive(me) && !pendingAction && (
