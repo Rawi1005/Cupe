@@ -1,57 +1,65 @@
 /* ---------------------------------------------------------------
    /api/kv — shared key/value store for cross-device multiplayer
 
-   Backed by Vercel KV / Upstash Redis over its REST API. The
-   Marketplace integration exposes KV_REST_API_URL and
-   KV_REST_API_TOKEN; we talk to it with plain fetch so there's no
-   SDK dependency to keep in sync.
+   Backed by a standard Redis database over the Redis protocol. Set a
+   connection string in the REDIS_URL environment variable, e.g.
+
+       redis://default:password@host:6379
+       rediss://default:password@host:6379   (TLS)
+
+   Vercel KV / Upstash also expose such a string as KV_URL, so either
+   env var works.
 
    GET  /api/kv?key=<key>      -> { value: <string|null> }
    POST /api/kv { key, value } -> { ok: true }
 
-   When the env vars are missing the endpoint returns 501 so the
-   client can fall back to localStorage.
+   When no connection string is configured the endpoint returns 501 so
+   the client can fall back to localStorage.
 --------------------------------------------------------------- */
-const REST_URL = process.env.KV_REST_API_URL;
-const REST_TOKEN = process.env.KV_REST_API_TOKEN;
+import Redis from "ioredis";
+
+const REDIS_URL = process.env.REDIS_URL || process.env.KV_URL;
 
 // Rooms are ephemeral — expire them a day after the last write so the
 // store doesn't fill up with abandoned games.
 const TTL_SECONDS = 60 * 60 * 24;
 
-async function redis(command) {
-  const res = await fetch(REST_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${REST_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(command),
-  });
-  if (!res.ok) {
-    throw new Error(`Upstash ${res.status}: ${await res.text()}`);
+// Reuse one connection across warm invocations instead of dialing on
+// every request. Cached on globalThis so it survives module reloads.
+function getClient() {
+  if (!REDIS_URL) return null;
+  if (!globalThis.__coupRedis) {
+    globalThis.__coupRedis = new Redis(REDIS_URL, {
+      maxRetriesPerRequest: 3,
+      lazyConnect: false,
+      // Upstash and most managed Redis over `rediss://` need TLS; ioredis
+      // picks that up from the URL scheme automatically.
+    });
+    globalThis.__coupRedis.on("error", (e) => {
+      console.error("Redis connection error:", e?.message || e);
+    });
   }
-  const data = await res.json();
-  return data.result;
+  return globalThis.__coupRedis;
 }
 
 export default async function handler(req, res) {
-  if (!REST_URL || !REST_TOKEN) {
-    return res.status(501).json({ error: "KV not configured" });
+  const client = getClient();
+  if (!client) {
+    return res.status(501).json({ error: "Redis not configured" });
   }
 
   try {
     if (req.method === "GET") {
       const key = req.query.key;
       if (!key) return res.status(400).json({ error: "missing key" });
-      const value = await redis(["GET", key]);
+      const value = await client.get(key);
       return res.status(200).json({ value: value ?? null });
     }
 
     if (req.method === "POST") {
       const { key, value } = req.body || {};
       if (!key) return res.status(400).json({ error: "missing key" });
-      await redis(["SET", key, String(value), "EX", TTL_SECONDS]);
+      await client.set(key, String(value), "EX", TTL_SECONDS);
       return res.status(200).json({ ok: true });
     }
 

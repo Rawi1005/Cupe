@@ -27,19 +27,27 @@ The repo ships a `vercel.json` and is a standard Vite app.
   vercel --prod # production deploy
   ```
 
-### Enable cross-device multiplayer (Vercel KV)
+### Enable cross-device multiplayer (Redis)
 
 For friends on **other devices** to join a room, the deployment needs a shared store. The app talks
-to a serverless endpoint (`api/kv.js`) backed by Vercel KV / Upstash Redis:
+to a serverless endpoint (`api/kv.js`) backed by any standard **Redis** database.
 
-1. In your Vercel project go to **Storage → Create Database → KV (Upstash Redis)** and connect it to
-   the project. (On the [Marketplace](https://vercel.com/marketplace), the Upstash Redis integration
-   works the same way.)
-2. Connecting it automatically adds the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment
-   variables to the project.
-3. Redeploy. That's it — no code changes needed.
+1. Add a `REDIS_URL` environment variable to the Vercel project (**Settings → Environment
+   Variables**) with your Redis connection string:
 
-If those env vars are absent, the endpoint returns `501` and the app **automatically falls back to
+   ```
+   redis://default:<password>@<host>:<port>
+   rediss://default:<password>@<host>:<port>   # use rediss:// for TLS
+   ```
+
+   Your Redis must be reachable from Vercel's servers (i.e. a publicly accessible / managed Redis,
+   not one bound to localhost or a private network).
+2. Redeploy. That's it — no code changes needed.
+
+Already using Vercel KV / Upstash? It exposes the same kind of connection string as `KV_URL`, and
+the endpoint reads that too — so `REDIS_URL` **or** `KV_URL` works.
+
+If neither is set, the endpoint returns `501` and the app **automatically falls back to
 `localStorage`**, so it still runs — but rooms are then only visible within a single browser.
 
 ## Multiplayer & storage
@@ -48,10 +56,11 @@ The game shares room state through a `window.storage` key/value API. The origina
 Claude artifacts runtime, which provided that global; here it's replaced by a shim
 (`src/storage.js`) installed before the app renders:
 
-- **Shared** values (room state) go through `/api/kv` → Vercel KV / Upstash Redis, so every player
-  sees the same room across devices. Rooms auto-expire 24h after their last update.
+- **Shared** values (room state) go through `/api/kv` → Redis, so every player sees the same room
+  across devices. Rooms auto-expire 24h after their last update.
 - **Local** values (this device's player id) stay in `localStorage`.
-- If KV isn't configured or is unreachable, shared values transparently fall back to `localStorage`.
+- If Redis isn't configured or is unreachable, shared values transparently fall back to
+  `localStorage`.
 
 ## How to play
 
