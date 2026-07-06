@@ -15,7 +15,7 @@ npm run preview  # serve the production build locally
 
 ## Deploying to Vercel
 
-The repo ships a `vercel.json` and is a standard Vite app, so no configuration is needed.
+The repo ships a `vercel.json` and is a standard Vite app.
 
 - **Dashboard:** import the repository at [vercel.com/new](https://vercel.com/new). Vercel auto-detects the Vite framework preset:
   - Build command: `npm run build`
@@ -27,16 +27,31 @@ The repo ships a `vercel.json` and is a standard Vite app, so no configuration i
   vercel --prod # production deploy
   ```
 
+### Enable cross-device multiplayer (Vercel KV)
+
+For friends on **other devices** to join a room, the deployment needs a shared store. The app talks
+to a serverless endpoint (`api/kv.js`) backed by Vercel KV / Upstash Redis:
+
+1. In your Vercel project go to **Storage → Create Database → KV (Upstash Redis)** and connect it to
+   the project. (On the [Marketplace](https://vercel.com/marketplace), the Upstash Redis integration
+   works the same way.)
+2. Connecting it automatically adds the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment
+   variables to the project.
+3. Redeploy. That's it — no code changes needed.
+
+If those env vars are absent, the endpoint returns `501` and the app **automatically falls back to
+`localStorage`**, so it still runs — but rooms are then only visible within a single browser.
+
 ## Multiplayer & storage
 
 The game shares room state through a `window.storage` key/value API. The original ran inside the
-Claude artifacts runtime, which provided that global; here it's replaced by a localStorage-backed
-shim (`src/storage.js`) that is installed before the app renders.
+Claude artifacts runtime, which provided that global; here it's replaced by a shim
+(`src/storage.js`) installed before the app renders:
 
-Because it uses `localStorage`, room state is shared **across tabs/windows of the same browser on
-the same device** — good for local hot-seat / same-machine play. It is **not** shared across
-different devices or browsers. For true cross-device multiplayer you'd swap `src/storage.js` for a
-shared server-side store (e.g. Vercel KV / Upstash Redis) behind a small serverless API.
+- **Shared** values (room state) go through `/api/kv` → Vercel KV / Upstash Redis, so every player
+  sees the same room across devices. Rooms auto-expire 24h after their last update.
+- **Local** values (this device's player id) stay in `localStorage`.
+- If KV isn't configured or is unreachable, shared values transparently fall back to `localStorage`.
 
 ## How to play
 
