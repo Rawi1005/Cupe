@@ -30,6 +30,15 @@ const ROLE_INFO = {
 };
 const ROLES = Object.keys(ROLE_INFO);
 
+// Card art lives in public/assets (filenames match what was uploaded).
+const ROLE_IMG = {
+  Duke: "/assets/duke.png",
+  Assassin: "/assets/assasin.png",
+  Captain: "/assets/captain.png",
+  Ambassador: "/assets/ambassdor.png",
+  Contessa: "/assets/cortessa.png",
+};
+
 const ACTIONS = {
   income: { label: "Income", gain: 1, cost: 0, challengeable: false, blockable: false },
   foreignAid: { label: "Foreign Aid", gain: 2, cost: 0, challengeable: false, blockable: true, blockRoles: ["Duke"] },
@@ -451,27 +460,43 @@ function Announcer({ event }) {
   if (!event) return null;
   const { Icon, color, big } = announcementStyle(event.text);
   return (
-    <div className="fixed left-1/2 z-50 px-4 w-full pointer-events-none" style={{ top: "max(14px, env(safe-area-inset-top))", maxWidth: 620 }}>
+    <div className="fixed inset-x-0 z-50 px-4 pointer-events-none flex justify-center" style={{ top: "max(14px, env(safe-area-inset-top))" }}>
       <div
         key={event.id}
-        className="mx-auto flex items-center gap-3 rounded-xl px-4 py-3 shadow-xl"
+        className={`coup-banner relative overflow-hidden flex items-center gap-3.5 rounded-2xl ${big ? "px-5 py-4" : "px-4 py-3"}`}
         style={{
-          background: "linear-gradient(180deg, #2a2416, #1c1810)",
-          border: `1.5px solid ${color}`,
-          boxShadow: `0 10px 30px #000000aa, 0 0 0 1px ${color}22`,
-          animation: "coup-announce 3.6s cubic-bezier(0.2, 0.8, 0.2, 1) both",
+          maxWidth: 620,
+          background: "linear-gradient(180deg, #2e2718, #191510)",
+          border: `2px solid ${color}`,
+          boxShadow: `0 14px 44px #000000cc, 0 0 26px ${color}${big ? "77" : "44"}, inset 0 1px 0 #ffffff1a`,
+          ["--banner-glow"]: color,
         }}
       >
-        <div className="shrink-0 rounded-full flex items-center justify-center" style={{ width: 38, height: 38, background: `${color}22`, border: `1px solid ${color}55` }}>
-          <Icon size={20} color={color} />
+        {/* one-shot shine that sweeps across as the banner lands */}
+        <span
+          className="coup-banner-shine absolute inset-y-0 pointer-events-none"
+          style={{ width: 90, background: "linear-gradient(105deg, transparent, #ffffff2e, transparent)" }}
+        />
+        <div
+          className="coup-banner-icon shrink-0 rounded-full flex items-center justify-center"
+          style={{
+            width: big ? 46 : 40,
+            height: big ? 46 : 40,
+            background: `radial-gradient(circle at 35% 30%, ${color}44, ${color}1a)`,
+            border: `1.5px solid ${color}`,
+            boxShadow: `0 0 16px ${color}66`,
+          }}
+        >
+          <Icon size={big ? 24 : 20} color={color} />
         </div>
         <span
           style={{
             color: C.parchment,
             fontFamily: big ? "'Playfair Display', serif" : "'Inter', sans-serif",
-            fontSize: big ? 19 : 16,
+            fontSize: big ? 20 : 16,
             fontWeight: big ? 700 : 600,
-            lineHeight: 1.25,
+            lineHeight: 1.3,
+            textShadow: "0 1px 2px #000000aa",
           }}
         >
           {event.text}
@@ -515,46 +540,84 @@ function ChoiceBtn({ title, sub, tone = "ghost", disabled, onClick, right }) {
 function CardTile({ role, revealed, faceDown, size = "md" }) {
   const info = ROLE_INFO[role] || { color: C.muted, blurb: "" };
   const d = size === "sm"
-    ? { w: 88, h: 128, name: 13, icon: 16, blurb: false }
-    : { w: 122, h: 178, name: 17, icon: 24, blurb: true };
+    ? { w: 92, h: 134, name: 12.5, blurb: false, radius: 10, icon: 18 }
+    : { w: 128, h: 188, name: 16, blurb: true, radius: 14, icon: 26 };
+  const frame = {
+    width: d.w,
+    height: d.h,
+    borderRadius: d.radius,
+    boxShadow: "0 8px 18px #00000073, 0 2px 5px #00000059",
+  };
   if (faceDown) {
     return (
       <div
-        className="rounded-xl flex items-center justify-center shrink-0"
+        className="coup-card relative flex items-center justify-center shrink-0 overflow-hidden"
         style={{
-          width: d.w,
-          height: d.h,
-          background: `repeating-linear-gradient(135deg, ${C.panel}, ${C.panel} 6px, #2a241b 6px, #2a241b 12px)`,
-          border: `1px solid ${C.panelLine}`,
+          ...frame,
+          background: `radial-gradient(circle at 50% 42%, #2b2418, #191510 70%), repeating-linear-gradient(135deg, ${C.panel}, ${C.panel} 6px, #2a241b 6px, #2a241b 12px)`,
+          border: `1px solid #40382c`,
         }}
       >
-        <Crown size={d.icon} color={C.goldDim} />
+        <div className="absolute pointer-events-none" style={{ inset: 4, borderRadius: d.radius - 5, border: `1px solid ${C.goldDim}66` }} />
+        <div className="rounded-full flex items-center justify-center" style={{ width: d.icon * 2, height: d.icon * 2, border: `1px solid ${C.goldDim}88` }}>
+          <Crown size={d.icon} color={C.goldDim} />
+        </div>
       </div>
     );
   }
   return (
     <div
-      className="rounded-xl flex flex-col items-center p-2.5 shrink-0 relative text-center"
+      className="coup-card relative shrink-0 overflow-hidden"
       style={{
-        width: d.w,
-        height: d.h,
-        background: revealed ? "#211a17" : `linear-gradient(160deg, ${info.color}2e, ${C.panel})`,
-        border: `1.5px solid ${revealed ? C.panelLine : info.color}`,
-        opacity: revealed ? 0.55 : 1,
+        ...frame,
+        background: C.panel,
+        border: `1.5px solid ${revealed ? "#3a332a" : info.color}`,
       }}
     >
-      <div className="w-full font-bold" style={{ color: info.color, fontFamily: "'Playfair Display', serif", fontSize: d.name, lineHeight: 1.15 }}>
-        {role}
+      <img
+        src={ROLE_IMG[role]}
+        alt={role}
+        draggable={false}
+        className="absolute inset-0 w-full h-full object-cover select-none"
+        style={{ filter: revealed ? "grayscale(0.9) brightness(0.45)" : "saturate(1.05)" }}
+      />
+      {/* inner gilt trim */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          inset: 3,
+          borderRadius: d.radius - 4,
+          border: `1px solid ${revealed ? "#ffffff14" : `${info.color}99`}`,
+          boxShadow: "inset 0 0 14px #00000099",
+        }}
+      />
+      {/* name plate over a bottom fade so the art stays visible */}
+      <div
+        className="absolute left-0 right-0 bottom-0 px-2 pb-1.5 pt-7 text-center"
+        style={{ background: "linear-gradient(180deg, transparent, #0b0906d9 52%, #0b0906f2)" }}
+      >
+        <div
+          style={{
+            color: revealed ? C.muted : info.color,
+            fontFamily: "'Playfair Display', serif",
+            fontWeight: 700,
+            fontSize: d.name,
+            lineHeight: 1.15,
+            letterSpacing: "0.03em",
+            textShadow: "0 1px 3px #000000cc",
+          }}
+        >
+          {role}
+        </div>
+        {d.blurb && !revealed && (
+          <p style={{ color: C.parchment, fontSize: 9.5, lineHeight: 1.3, opacity: 0.92, marginTop: 1 }}>{info.blurb}</p>
+        )}
       </div>
-      <div className="flex-1 flex items-center">
-        <Swords size={d.icon} color={info.color} style={{ opacity: 0.8 }} />
-      </div>
-      {d.blurb && (
-        <p style={{ color: C.parchment, fontSize: 10.5, lineHeight: 1.35, opacity: 0.85 }}>{info.blurb}</p>
-      )}
+      {!revealed && <div className="coup-card-sheen absolute inset-0 pointer-events-none" />}
       {revealed && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-xl" style={{ background: "#15130Fb8" }}>
+        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#15130F80" }}>
           <span
+            className="coup-stamp"
             style={{
               color: C.sealBright,
               fontSize: 13,
@@ -563,7 +626,7 @@ function CardTile({ role, revealed, faceDown, size = "md" }) {
               border: `2px solid ${C.sealBright}`,
               borderRadius: 6,
               padding: "3px 10px",
-              transform: "rotate(-12deg)",
+              background: "#15130Fcc",
             }}
           >
             OUT
@@ -1097,7 +1160,7 @@ export default function App() {
               </p>
               <div className="flex gap-3 mb-4 flex-wrap justify-center sm:justify-start">
                 {me?.hand.map((c, i) => (
-                  <div key={i} className="coup-pop" style={{ animationDelay: `${i * 0.08}s` }}>
+                  <div key={i} className="coup-deal" style={{ animationDelay: `${i * 0.12}s` }}>
                     <CardTile role={c.role} revealed={c.revealed} />
                   </div>
                 ))}
@@ -1143,9 +1206,17 @@ export default function App() {
               <summary style={{ color: C.muted, fontSize: 12, cursor: "pointer" }}>Role reference</summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                 {ROLES.map((r) => (
-                  <div key={r} className="rounded-md px-3 py-2" style={{ background: C.feltDark, border: `1px solid ${C.panelLine}` }}>
-                    <span style={{ color: ROLE_INFO[r].color, fontWeight: 700, fontSize: 12 }}>{r}</span>
-                    <p style={{ color: C.muted, fontSize: 11.5 }}>{ROLE_INFO[r].blurb}</p>
+                  <div key={r} className="rounded-md px-3 py-2 flex items-center gap-2.5" style={{ background: C.feltDark, border: `1px solid ${C.panelLine}` }}>
+                    <img
+                      src={ROLE_IMG[r]}
+                      alt={r}
+                      className="shrink-0 object-cover"
+                      style={{ width: 30, height: 42, borderRadius: 5, border: `1px solid ${ROLE_INFO[r].color}88` }}
+                    />
+                    <div className="min-w-0">
+                      <span style={{ color: ROLE_INFO[r].color, fontWeight: 700, fontSize: 12 }}>{r}</span>
+                      <p style={{ color: C.muted, fontSize: 11.5 }}>{ROLE_INFO[r].blurb}</p>
+                    </div>
                   </div>
                 ))}
               </div>
