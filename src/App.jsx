@@ -1,25 +1,36 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Crown, Skull, Swords, Coins, Users, Copy, Check, ShieldAlert, Eye, EyeOff, LogOut } from "lucide-react";
+import { Crown, Skull, Swords, Coins, Users, Copy, Check, ShieldAlert, Eye, EyeOff, LogOut, Hourglass } from "lucide-react";
 
 /* ---------------------------------------------------------------
-   THEME — a smoky back-room card table: charcoal felt, brass, wax-seal red
+   THEME — dark ink & brass with liquid-glass panels
 --------------------------------------------------------------- */
 const C = {
-  bg: "#15130F",
-  felt: "#1B2620",
-  feltDark: "#121B16",
-  panel: "#211C16",
-  panelLine: "#3A3227",
+  bg: "#131118",
+  felt: "#1B1822",
+  feltDark: "#131118",
+  panel: "#221E2A",
+  panelLine: "#3B3444",
   gold: "#C9A24B",
   goldDim: "#8A7038",
-  parchment: "#E9E0C9",
-  muted: "#9A9080",
+  parchment: "#EDE7D8",
+  muted: "#9C94A8",
   seal: "#8A2A2A",
   sealBright: "#B23A3A",
-  steel: "#4C6B7A",
+  steel: "#5B7C8C",
   moss: "#5C7A4E",
   plum: "#6B4E7A",
 };
+
+// Copernicus (Anthropic's serif) isn't openly licensed — Source Serif 4 is
+// the closest open substitute and is loaded in index.css.
+const SERIF = "'Source Serif 4', 'Copernicus', Georgia, serif";
+const SANS = "'Inter', sans-serif";
+
+// Soft glow blobs over near-black ink; the glass panels blur into this.
+const PAGE_BG = `radial-gradient(50rem 34rem at 12% -8%, rgba(201, 162, 75, 0.10), transparent 60%), radial-gradient(56rem 40rem at 105% 108%, rgba(107, 78, 122, 0.24), transparent 60%), radial-gradient(40rem 30rem at 88% 18%, rgba(91, 124, 140, 0.10), transparent 65%), linear-gradient(180deg, #1A1720, ${C.bg})`;
+
+// Seconds a player gets to act before the table plays for them.
+const TURN_SECONDS = 30;
 
 const ROLE_INFO = {
   Duke: { blurb: "Collects Tax (+3 coins). Blocks Foreign Aid.", color: C.gold },
@@ -51,24 +62,24 @@ const ACTIONS = {
 
 // Plain-language help shown on the action menu and in prompts.
 const ACTION_HELP = {
-  income: { tag: "+1 coin", desc: "Take 1 coin. Always safe — nobody can stop it." },
-  foreignAid: { tag: "+2 coins", desc: "Take 2 coins. Anyone claiming the Duke can block it." },
-  tax: { tag: "+3 coins", desc: "Claim the Duke and take 3 coins. Can be challenged." },
-  steal: { tag: "+2 coins", desc: "Claim the Captain and steal up to 2 coins from a player." },
-  assassinate: { tag: "pay 3", desc: "Claim the Assassin: pay 3 to destroy one of a player's cards. Contessa blocks it." },
-  exchange: { tag: "swap", desc: "Claim the Ambassador: draw 2 cards and keep the ones you like best." },
-  coup: { tag: "pay 7", desc: "Pay 7 to destroy one of a player's cards. Cannot be blocked or challenged." },
+  income: { tag: "+1", desc: "Always safe." },
+  foreignAid: { tag: "+2", desc: "A Duke can block it." },
+  tax: { tag: "+3", desc: "Needs the Duke." },
+  steal: { tag: "+2", desc: "Take 2 coins from a player." },
+  assassinate: { tag: "pay 3", desc: "Destroy a player's card. Contessa blocks." },
+  exchange: { tag: "swap", desc: "Draw 2, keep your best." },
+  coup: { tag: "pay 7", desc: "Destroy a player's card. Unstoppable." },
 };
 const ACTION_ORDER = ["income", "foreignAid", "tax", "steal", "assassinate", "exchange", "coup"];
 
 // "<name> …" sentence describing what the actor is attempting, for everyone else.
 function describeAttempt(type, targetName) {
   switch (type) {
-    case "foreignAid": return "wants to take Foreign Aid (+2 coins). Only a Duke can block it.";
-    case "tax": return "claims the Duke to take Tax (+3 coins).";
-    case "steal": return `claims the Captain to steal up to 2 coins from ${targetName}.`;
-    case "assassinate": return `pays 3 coins and claims the Assassin to destroy one of ${targetName}'s cards.`;
-    case "exchange": return "claims the Ambassador to swap cards with the deck.";
+    case "foreignAid": return "takes Foreign Aid (+2). A Duke can block it.";
+    case "tax": return "claims the Duke — Tax (+3).";
+    case "steal": return `claims the Captain to steal from ${targetName}.`;
+    case "assassinate": return `claims the Assassin — targeting ${targetName}!`;
+    case "exchange": return "claims the Ambassador to swap cards.";
     default: return `attempts ${ACTIONS[type]?.label || type}.`;
   }
 }
@@ -77,7 +88,9 @@ function describeAttempt(type, targetName) {
    helpers
 --------------------------------------------------------------- */
 const uid = () => Math.random().toString(36).slice(2, 10);
-const roomCodeGen = () => Array.from({ length: 4 }, () => "BCDFGHJKLMNPQRSTVWXYZ"[Math.floor(Math.random() * 21)]).join("");
+// Kahoot-style 6-digit game PIN.
+const roomCodeGen = () => String(Math.floor(100000 + Math.random() * 900000));
+const isPin = (s) => /^\d{6}$/.test(s);
 const shuffle = (arr) => {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -128,6 +141,22 @@ function startGame(room) {
   room.turnIndex = 0;
   room.turn = { phase: "idle" };
   log(room, "The game begins. " + room.players[0].name + " is up first.");
+}
+
+// Same table, fresh deck and hands.
+function resetGame(room) {
+  const deck = freshDeck();
+  room.players = room.players.map((p) => ({
+    ...p,
+    coins: 2,
+    hand: [{ role: deck.pop(), revealed: false }, { role: deck.pop(), revealed: false }],
+  }));
+  room.deck = deck;
+  room.status = "playing";
+  room.turnIndex = 0;
+  room.turn = { phase: "idle" };
+  room.winner = null;
+  room.log = [`New game! ${room.players[0].name} is up first.`];
 }
 
 function nextTurn(room) {
@@ -324,6 +353,49 @@ function pickLoseCard(room, playerId, cardIndex) {
   }
 }
 
+/* When someone idles past the deadline the table plays the safest move
+   for them. Every mutation here is deterministic, so if two clients
+   both apply the timeout they converge on the same room state. */
+function autoPlay(room) {
+  const t = room.turn || {};
+  if (room.status !== "playing") return;
+  if (t.phase === "idle") {
+    const actor = room.players[room.turnIndex];
+    if (!actor) return;
+    if (actor.coins >= 10) {
+      const target = otherAlive(room, actor.id)[0];
+      log(room, `${actor.name} ran out of time.`);
+      if (target) declareAction(room, actor.id, "coup", target.id);
+      else nextTurn(room);
+    } else {
+      log(room, `${actor.name} ran out of time — Income (+1).`);
+      actor.coins += 1;
+      nextTurn(room);
+    }
+  } else if (t.phase === "action-pending") {
+    Object.keys(t.responses || {}).forEach((id) => {
+      if (t.responses[id] === "pending") t.responses[id] = "pass";
+    });
+    log(room, "Time's up — the action goes through.");
+    resolveAction(room);
+  } else if (t.phase === "block-pending") {
+    log(room, "Time's up — the block stands.");
+    respondToBlock(room, t.action.actorId, "accept");
+  } else if (t.phase === "lose-influence") {
+    const pid = t.pendingLoss[0];
+    const p = room.players.find((x) => x.id === pid);
+    const idx = p ? p.hand.findIndex((c) => !c.revealed) : -1;
+    if (idx < 0) return;
+    log(room, `${p.name} ran out of time.`);
+    pickLoseCard(room, pid, idx);
+  } else if (t.phase === "exchange") {
+    const actor = room.players.find((p) => p.id === t.actorId);
+    const keepCount = actor ? actor.hand.filter((c) => !c.revealed).length : 0;
+    log(room, "Time's up — cards stay as they were.");
+    completeExchange(room, t.actorId, Array.from({ length: keepCount }, (_, i) => i));
+  }
+}
+
 function completeExchange(room, actorId, keepIndices) {
   const t = room.turn;
   if (!t || t.phase !== "exchange") return;
@@ -366,9 +438,9 @@ async function saveRoom(room) {
 --------------------------------------------------------------- */
 function Btn({ children, onClick, tone = "gold", disabled, small, full }) {
   const tones = {
-    gold: { bg: C.gold, fg: "#1B160E", border: C.gold },
-    seal: { bg: C.seal, fg: C.parchment, border: C.sealBright },
-    ghost: { bg: "transparent", fg: C.parchment, border: C.panelLine },
+    gold: { bg: "linear-gradient(180deg, #DDB863, #BD9542)", fg: "#1B160E", border: "#E4C378" },
+    seal: { bg: "linear-gradient(180deg, #9C3535, #7C2424)", fg: C.parchment, border: C.sealBright },
+    ghost: { bg: "rgba(255, 255, 255, 0.07)", fg: C.parchment, border: "rgba(255, 255, 255, 0.16)" },
   };
   const s = tones[tone];
   return (
@@ -377,13 +449,14 @@ function Btn({ children, onClick, tone = "gold", disabled, small, full }) {
       disabled={disabled}
       className={`rounded-lg font-semibold transition-all ${small ? "px-3.5 py-2 text-sm" : "px-5 py-2.5 text-base"} ${full ? "w-full" : ""}`}
       style={{
-        background: disabled ? "#3a352c" : s.bg,
-        color: disabled ? "#8a8070" : s.fg,
-        border: `1px solid ${disabled ? "#3a352c" : s.border}`,
-        opacity: disabled ? 0.6 : 1,
+        background: disabled ? "rgba(255, 255, 255, 0.05)" : s.bg,
+        color: disabled ? "#7d7588" : s.fg,
+        border: `1px solid ${disabled ? "rgba(255, 255, 255, 0.08)" : s.border}`,
+        opacity: disabled ? 0.7 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
         letterSpacing: "0.02em",
         minHeight: small ? 42 : 48,
+        boxShadow: disabled ? "none" : "0 4px 14px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25)",
       }}
       onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.filter = "brightness(1.12)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
@@ -443,6 +516,33 @@ function Waiting({ children, spectating }) {
   );
 }
 
+/* Countdown until the table auto-plays for whoever is stalling. */
+function TurnTimer({ deadline, now }) {
+  const left = Math.max(0, deadline - now);
+  const secs = Math.ceil(left / 1000);
+  const frac = Math.min(1, left / (TURN_SECONDS * 1000));
+  const urgent = secs <= 10;
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <Hourglass size={13} color={urgent ? C.sealBright : C.muted} className={urgent ? "coup-urgent" : ""} />
+      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255, 255, 255, 0.08)" }}>
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${frac * 100}%`,
+            background: urgent ? C.sealBright : C.gold,
+            boxShadow: `0 0 8px ${urgent ? C.sealBright : C.gold}66`,
+            transition: "width 0.4s linear, background 0.3s ease",
+          }}
+        />
+      </div>
+      <span style={{ color: urgent ? C.sealBright : C.muted, fontSize: 12, fontWeight: 700, minWidth: 28, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+        {secs}s
+      </span>
+    </div>
+  );
+}
+
 /* Big game-show style banner that drops in for each new table event so
    nobody misses what just happened. Reads the latest log line. */
 function announcementStyle(text) {
@@ -453,6 +553,7 @@ function announcementStyle(text) {
   if (/steal/.test(t)) return { Icon: Coins, color: C.steel, big: false };
   if (/tax|foreign aid|income|exchange|draws/.test(t)) return { Icon: Coins, color: C.gold, big: false };
   if (/block/.test(t)) return { Icon: ShieldAlert, color: C.moss, big: false };
+  if (/out of time|time's up/.test(t)) return { Icon: Hourglass, color: C.steel, big: false };
   return { Icon: Swords, color: C.gold, big: false };
 }
 
@@ -466,7 +567,9 @@ function Announcer({ event }) {
         className={`coup-banner relative overflow-hidden flex items-center gap-3.5 rounded-2xl ${big ? "px-5 py-4" : "px-4 py-3"}`}
         style={{
           maxWidth: 620,
-          background: "linear-gradient(180deg, #2e2718, #191510)",
+          background: "linear-gradient(165deg, rgba(56, 48, 38, 0.78), rgba(22, 18, 16, 0.86))",
+          backdropFilter: "blur(16px) saturate(1.3)",
+          WebkitBackdropFilter: "blur(16px) saturate(1.3)",
           border: `2px solid ${color}`,
           boxShadow: `0 14px 44px #000000cc, 0 0 26px ${color}${big ? "77" : "44"}, inset 0 1px 0 #ffffff1a`,
           ["--banner-glow"]: color,
@@ -492,7 +595,7 @@ function Announcer({ event }) {
         <span
           style={{
             color: C.parchment,
-            fontFamily: big ? "'Playfair Display', serif" : "'Inter', sans-serif",
+            fontFamily: big ? SERIF : SANS,
             fontSize: big ? 20 : 16,
             fontWeight: big ? 700 : 600,
             lineHeight: 1.3,
@@ -510,19 +613,20 @@ function Announcer({ event }) {
    used for challenge / block / allow choices and target picking. */
 function ChoiceBtn({ title, sub, tone = "ghost", disabled, onClick, right }) {
   const styles = {
-    gold: { bg: "#2a2416", border: C.gold, title: C.gold },
-    seal: { bg: "#2a1815", border: C.sealBright, title: "#E8A9A9" },
-    ghost: { bg: C.feltDark, border: C.panelLine, title: C.parchment },
+    gold: { bg: "rgba(201, 162, 75, 0.13)", border: `${C.gold}AA`, title: C.gold },
+    seal: { bg: "rgba(178, 58, 58, 0.14)", border: C.sealBright, title: "#E8A9A9" },
+    ghost: { bg: "rgba(255, 255, 255, 0.05)", border: "rgba(255, 255, 255, 0.13)", title: C.parchment },
   };
   const s = styles[tone];
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className="w-full text-left rounded-lg px-4 py-3"
+      className="w-full text-left rounded-xl px-4 py-3"
       style={{
-        background: disabled ? "#241f18" : s.bg,
-        border: `1px solid ${disabled ? C.panelLine : s.border}`,
+        background: disabled ? "rgba(255, 255, 255, 0.03)" : s.bg,
+        border: `1px solid ${disabled ? "rgba(255, 255, 255, 0.07)" : s.border}`,
+        boxShadow: disabled ? "none" : "inset 0 1px 0 rgba(255, 255, 255, 0.07)",
         opacity: disabled ? 0.45 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
         minHeight: 52,
@@ -599,7 +703,7 @@ function CardTile({ role, revealed, faceDown, size = "md" }) {
         <div
           style={{
             color: revealed ? C.muted : info.color,
-            fontFamily: "'Playfair Display', serif",
+            fontFamily: SERIF,
             fontWeight: 700,
             fontSize: d.name,
             lineHeight: 1.15,
@@ -643,8 +747,11 @@ function PlayerBadge({ p, isMe, isTurn, isTarget }) {
     <div
       className={`rounded-lg px-3 py-2 flex items-center gap-2 ${isTurn && alive ? "coup-turn-glow" : ""} ${isTarget ? "coup-pop" : ""}`}
       style={{
-        background: isTurn ? "#2a2416" : C.panel,
-        border: `1px solid ${isTurn ? C.gold : isTarget ? C.seal : C.panelLine}`,
+        background: isTurn ? "rgba(201, 162, 75, 0.11)" : "rgba(255, 255, 255, 0.055)",
+        border: `1px solid ${isTurn ? C.gold : isTarget ? C.seal : "rgba(255, 255, 255, 0.11)"}`,
+        backdropFilter: "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.06)",
         opacity: alive ? 1 : 0.45,
       }}
     >
@@ -685,6 +792,9 @@ export default function App() {
   const [exchangeKeep, setExchangeKeep] = useState([]);
   const [busy, setBusy] = useState(false);
   const [announce, setAnnounce] = useState(null); // { text, id }
+  const [homeStep, setHomeStep] = useState("pin"); // pin | name
+  const [homeMode, setHomeMode] = useState("join"); // join | host
+  const [now, setNow] = useState(Date.now());
   const pollRef = useRef(null);
   const codeRef = useRef(null);
   const lastLogRef = useRef(null);
@@ -710,10 +820,32 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [announce?.id]);
 
+  // Tick while a game runs so the countdown bar re-renders.
+  useEffect(() => {
+    if (room?.status !== "playing") return;
+    const iv = setInterval(() => setNow(Date.now()), 400);
+    return () => clearInterval(iv);
+  }, [room?.status]);
+
+  // AFK guard: once the deadline passes, any client applies the default
+  // move. autoPlay is deterministic, so concurrent writers converge.
+  useEffect(() => {
+    if (room?.status !== "playing" || !room?.turn?.deadline) return;
+    const wait = room.turn.deadline - Date.now() + 500 + Math.random() * 800;
+    const timer = setTimeout(() => {
+      refresh((r) => {
+        if (r.status !== "playing" || !r.turn?.deadline) return;
+        if (Date.now() < r.turn.deadline) return; // someone acted meanwhile
+        autoPlay(r);
+      });
+    }, Math.max(400, wait));
+    return () => clearTimeout(timer);
+  }, [room?.turn?.deadline, room?.status]);
+
   // restore identity for a room on load
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
-    if (hash && hash.length === 4) setJoinCode(hash.toUpperCase());
+    if (isPin(hash)) setJoinCode(hash);
   }, []);
 
   const startPolling = useCallback((code) => {
@@ -742,17 +874,30 @@ export default function App() {
     setBusy(false);
   }
 
-  async function handleJoin() {
-    if (!name.trim()) return setError("Enter your name first.");
-    const code = joinCode.trim().toUpperCase();
-    if (code.length !== 4) return setError("Room codes are 4 letters.");
+  // Step 1 of joining: check the PIN before asking for a name.
+  async function checkPin() {
+    const code = joinCode.trim();
+    if (!isPin(code)) return setError("Game PINs are 6 digits.");
     setBusy(true);
     setError("");
     const existing = await loadRoom(code);
-    if (!existing) { setBusy(false); return setError("No room with that code."); }
-    if (existing.status !== "lobby") { setBusy(false); return setError("That game has already started."); }
+    setBusy(false);
+    if (!existing) return setError("No game with that PIN.");
+    if (existing.status !== "lobby") return setError("That game already started.");
+    setHomeMode("join");
+    setHomeStep("name");
+  }
+
+  async function handleJoin() {
+    if (!name.trim()) return setError("Enter your name first.");
+    const code = joinCode.trim();
+    setBusy(true);
+    setError("");
+    const existing = await loadRoom(code);
+    if (!existing) { setBusy(false); return setError("No game with that PIN."); }
+    if (existing.status !== "lobby") { setBusy(false); return setError("That game already started."); }
     if (existing.players.some((p) => p.name.toLowerCase() === name.trim().toLowerCase())) {
-      setBusy(false); return setError("That name is taken at this table.");
+      setBusy(false); return setError("That name is taken.");
     }
     const id = uid();
     addPlayer(existing, id, name.trim());
@@ -768,7 +913,13 @@ export default function App() {
   async function refresh(mutator) {
     const r = await loadRoom(codeRef.current);
     if (!r) return;
+    const before = JSON.stringify([r.turn, r.turnIndex, r.status]);
     mutator(r);
+    // Whenever the turn state changes, whoever must act next gets a
+    // fresh AFK deadline.
+    if (r.status === "playing" && JSON.stringify([r.turn, r.turnIndex, r.status]) !== before) {
+      r.turn.deadline = Date.now() + TURN_SECONDS * 1000;
+    }
     await saveRoom(r);
     setRoom(r);
   }
@@ -797,69 +948,94 @@ export default function App() {
     setMyId(null);
     setName("");
     setJoinCode("");
+    setHomeStep("pin");
+    setHomeMode("join");
+    setError("");
   }
 
   /* ---------------- render: HOME ---------------- */
   if (screen === "home") {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: `radial-gradient(ellipse at top, #241f16, ${C.bg})`, fontFamily: "'Inter', sans-serif" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');`}</style>
+      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: PAGE_BG, fontFamily: SANS }}>
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center gap-2 mb-2">
               <Crown color={C.gold} size={28} />
-              <h1 style={{ fontFamily: "'Playfair Display', serif", color: C.parchment, fontSize: 34, letterSpacing: "0.02em" }}>COUP</h1>
+              <h1 style={{ fontFamily: SERIF, color: C.parchment, fontSize: 34, letterSpacing: "0.02em" }}>COUP</h1>
             </div>
-            <p style={{ color: C.muted, fontSize: 13 }}>Bluff, block, and betray your way to the throne.</p>
+            <p style={{ color: C.muted, fontSize: 13 }}>You think your friends is trustworthy enough ?</p>
           </div>
 
-          <div className="rounded-xl p-5 mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-            <label className="block mb-1.5" style={{ color: C.muted, fontSize: 12 }}>Your name</label>
-            <input
-              value={name}
-              onChange={(e) => { setName(e.target.value); setError(""); }}
-              placeholder="e.g. Duchess Marlowe"
-              maxLength={18}
-              className="w-full rounded-md px-3 py-2.5 mb-4 outline-none"
-              style={{ background: C.feltDark, color: C.parchment, border: `1px solid ${C.panelLine}`, fontSize: 16 }}
-            />
+          {homeStep === "pin" ? (
+            <div key="pin" className="glass rounded-2xl p-5 mb-4 coup-rise">
+              <input
+                value={joinCode}
+                onChange={(e) => { setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && isPin(joinCode)) checkPin(); }}
+                placeholder="Game PIN"
+                inputMode="numeric"
+                autoComplete="off"
+                className="glass-deep w-full rounded-xl px-3 py-3 mb-3 outline-none text-center font-bold"
+                style={{
+                  color: C.gold,
+                  fontSize: 26,
+                  letterSpacing: joinCode ? "0.3em" : "0.02em",
+                }}
+              />
+              <Btn onClick={checkPin} disabled={busy || !isPin(joinCode)} full>
+                {busy ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color="#1B160E" /> Checking…</span> : "Enter"}
+              </Btn>
 
-            <Btn onClick={handleCreate} disabled={busy} full>
-              {busy ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color="#1B160E" /> Creating…</span> : "Create a room"}
-            </Btn>
+              <div className="flex items-center gap-2 my-4">
+                <div className="h-px flex-1" style={{ background: C.panelLine }} />
+                <span style={{ color: C.muted, fontSize: 11 }}>OR</span>
+                <div className="h-px flex-1" style={{ background: C.panelLine }} />
+              </div>
 
-            <div className="flex items-center gap-2 my-4">
-              <div className="h-px flex-1" style={{ background: C.panelLine }} />
-              <span style={{ color: C.muted, fontSize: 11 }}>OR</span>
-              <div className="h-px flex-1" style={{ background: C.panelLine }} />
+              <Btn onClick={() => { setHomeMode("host"); setHomeStep("name"); setError(""); }} tone="ghost" disabled={busy} full>
+                Host a new game
+              </Btn>
             </div>
-
-            <label className="block mb-1.5" style={{ color: C.muted, fontSize: 12 }}>Room code</label>
-            <input
-              value={joinCode}
-              onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setError(""); }}
-              placeholder="ABCD"
-              maxLength={4}
-              className="w-full rounded-md px-3 py-2.5 mb-3 outline-none tracking-[0.3em] text-center font-bold"
-              style={{ background: C.feltDark, color: C.gold, border: `1px solid ${C.panelLine}`, fontSize: 18 }}
-            />
-            <Btn onClick={handleJoin} tone="ghost" disabled={busy} full>
-              {busy ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color={C.parchment} /> Joining…</span> : "Join room"}
-            </Btn>
-          </div>
-
-          {error && (
-            <div className="text-center rounded-md py-2 px-3 mb-4" style={{ background: "#3a1c1c", color: "#e0a0a0", fontSize: 13 }}>{error}</div>
+          ) : (
+            <div key="name" className="glass rounded-2xl p-5 mb-4 coup-rise">
+              <p className="text-center mb-3" style={{ color: C.muted, fontSize: 13 }}>
+                {homeMode === "host" ? "Hosting a new game" : <>Joining game <b style={{ color: C.gold }}>{joinCode}</b></>}
+              </p>
+              <input
+                value={name}
+                onChange={(e) => { setName(e.target.value); setError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) (homeMode === "host" ? handleCreate : handleJoin)(); }}
+                placeholder="Your name"
+                maxLength={18}
+                autoFocus
+                className="glass-deep w-full rounded-xl px-3 py-3 mb-3 outline-none text-center font-semibold"
+                style={{ color: C.parchment, fontSize: 20 }}
+              />
+              <Btn onClick={homeMode === "host" ? handleCreate : handleJoin} disabled={busy || !name.trim()} full>
+                {busy
+                  ? <span className="flex items-center justify-center gap-2"><Spinner size={16} color="#1B160E" /> {homeMode === "host" ? "Creating…" : "Joining…"}</span>
+                  : "Go!"}
+              </Btn>
+              <div className="text-center mt-3">
+                <button onClick={() => { setHomeStep("pin"); setError(""); }} style={{ color: C.muted, fontSize: 13, cursor: "pointer" }}>
+                  ← Back
+                </button>
+              </div>
+            </div>
           )}
 
-          <details className="rounded-xl px-4 py-3" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-            <summary style={{ color: C.gold, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>New here? How to play</summary>
+          {error && (
+            <div className="text-center rounded-md py-2 px-3 mb-4 coup-pop" style={{ background: "#3a1c1c", color: "#e0a0a0", fontSize: 13 }}>{error}</div>
+          )}
+
+          <details className="glass rounded-2xl px-4 py-3">
+            <summary style={{ color: C.gold, fontSize: 14, cursor: "pointer", fontWeight: 600 }}>How to play</summary>
             <ul className="mt-2 flex flex-col gap-2" style={{ color: C.muted, fontSize: 13.5, lineHeight: 1.5, paddingLeft: 18, listStyle: "disc" }}>
-              <li>You start with <b style={{ color: C.parchment }}>2 secret cards</b> and 2 coins. Lose both cards and you're out.</li>
-              <li>On your turn, pick one action — earn coins or attack. Many actions belong to a role card, but <b style={{ color: C.parchment }}>you're allowed to bluff</b> about which cards you hold.</li>
-              <li>Think someone is bluffing? <b style={{ color: C.parchment }}>Challenge</b> them. Whoever turns out to be wrong gives up a card.</li>
-              <li>Save up 7 coins to launch a <b style={{ color: C.parchment }}>Coup</b> — it destroys a card and nothing can stop it.</li>
-              <li><b style={{ color: C.parchment }}>Last player with a card wins.</b></li>
+              <li><b style={{ color: C.parchment }}>2 secret cards</b>, 2 coins. Lose both cards — you're out.</li>
+              <li>One action per turn. <b style={{ color: C.parchment }}>Bluffing is allowed.</b></li>
+              <li>Smell a bluff? <b style={{ color: C.parchment }}>Challenge.</b> Whoever's wrong loses a card.</li>
+              <li>7 coins = <b style={{ color: C.parchment }}>Coup</b>. Unstoppable.</li>
+              <li><b style={{ color: C.parchment }}>Last player standing wins.</b></li>
             </ul>
           </details>
         </div>
@@ -874,25 +1050,24 @@ export default function App() {
   if (screen === "lobby" || (room.status === "lobby")) {
     const isHost = room.hostId === myId;
     return (
-      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: `radial-gradient(ellipse at top, #241f16, ${C.bg})`, fontFamily: "'Inter', sans-serif" }}>
-        <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');`}</style>
+      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: PAGE_BG, fontFamily: SANS }}>
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
-            <p style={{ color: C.muted, fontSize: 12 }}>ROOM CODE</p>
-            <button onClick={copyCode} className="mx-auto flex items-center gap-2 justify-center mt-1">
-              <span style={{ fontFamily: "'Playfair Display', serif", color: C.gold, fontSize: 40, letterSpacing: "0.15em" }}>{room.code}</span>
+            <p style={{ color: C.muted, fontSize: 12, letterSpacing: "0.14em" }}>GAME PIN</p>
+            <button onClick={copyCode} className="glass mx-auto flex items-center gap-2.5 justify-center mt-2 rounded-2xl px-5 py-2">
+              <span style={{ fontFamily: SERIF, color: C.gold, fontSize: 40, letterSpacing: "0.12em", fontWeight: 700 }}>{room.code}</span>
               {copied ? <Check size={20} color={C.moss} /> : <Copy size={18} color={C.muted} />}
             </button>
-            <p style={{ color: C.muted, fontSize: 12 }} className="mt-1">Share this code with your friends</p>
+            <p style={{ color: C.muted, fontSize: 12 }} className="mt-2">Friends enter this PIN to join</p>
           </div>
 
-          <div className="rounded-xl p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+          <div className="glass rounded-2xl p-4 mb-4">
             <div className="flex items-center gap-2 mb-3" style={{ color: C.muted, fontSize: 12 }}>
               <Users size={14} /> {room.players.length} at the table
             </div>
             <div className="flex flex-col gap-2">
               {room.players.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-md px-3 py-2" style={{ background: C.feltDark }}>
+                <div key={p.id} className="flex items-center justify-between rounded-lg px-3 py-2 coup-rise" style={{ background: "rgba(255, 255, 255, 0.05)", border: "1px solid rgba(255, 255, 255, 0.08)" }}>
                   <span style={{ color: C.parchment, fontSize: 14 }}>{p.name}{p.id === room.hostId ? " · host" : ""}{p.id === myId ? " (you)" : ""}</span>
                 </div>
               ))}
@@ -901,10 +1076,10 @@ export default function App() {
 
           {isHost ? (
             <Btn onClick={handleStart} disabled={room.players.length < 2} full>
-              {room.players.length < 2 ? "Waiting for more players…" : "Start the game"}
+              {room.players.length < 2 ? "Waiting for more players…" : "Start game"}
             </Btn>
           ) : (
-            <Waiting>Waiting for the host to start the game</Waiting>
+            <Waiting>Waiting for the host to start</Waiting>
           )}
           <div className="mt-3 text-center">
             <button onClick={leaveRoom} className="inline-flex items-center gap-1" style={{ color: C.muted, fontSize: 12 }}>
@@ -944,16 +1119,15 @@ export default function App() {
   const iAmBlocker = t.block?.by === myId;
 
   return (
-    <div className="min-h-screen w-full p-4 md:p-6" style={{ background: `radial-gradient(ellipse at top, ${C.felt}, ${C.feltDark})`, fontFamily: "'Inter', sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');`}</style>
+    <div className="min-h-screen w-full p-4 md:p-6" style={{ background: PAGE_BG, fontFamily: SANS }}>
       <Announcer event={announce} />
 
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Crown color={C.gold} size={20} />
-            <span style={{ fontFamily: "'Playfair Display', serif", color: C.parchment, fontSize: 20 }}>COUP</span>
-            <span style={{ color: C.muted, fontSize: 12 }}>· room {room.code}</span>
+            <span style={{ fontFamily: SERIF, color: C.parchment, fontSize: 20 }}>COUP</span>
+            <span style={{ color: C.muted, fontSize: 12 }}>· PIN {room.code}</span>
           </div>
           <button onClick={leaveRoom} className="flex items-center gap-1" style={{ color: C.muted, fontSize: 12 }}>
             <LogOut size={12} /> Leave
@@ -961,10 +1135,13 @@ export default function App() {
         </div>
 
         {finished ? (
-          <div className="rounded-xl p-8 text-center" style={{ background: C.panel, border: `1px solid ${C.gold}` }}>
+          <div className="glass rounded-2xl p-8 text-center coup-pop" style={{ border: `1px solid ${C.gold}88`, boxShadow: `0 12px 40px rgba(0, 0, 0, 0.5), 0 0 30px ${C.gold}22` }}>
             <Crown size={32} color={C.gold} className="mx-auto mb-2" />
-            <h2 style={{ fontFamily: "'Playfair Display', serif", color: C.gold, fontSize: 26 }}>{winner ? `${winner.name} rules the table` : "Game over"}</h2>
-            <p style={{ color: C.muted, fontSize: 13 }} className="mt-2">Every other influence has fallen.</p>
+            <h2 style={{ fontFamily: SERIF, color: C.gold, fontSize: 26 }}>{winner ? `${winner.name} rules the table` : "Game over"}</h2>
+            <div className="mt-5 flex flex-col gap-2 max-w-xs mx-auto">
+              <Btn onClick={() => refresh((r) => resetGame(r))} full>Play again</Btn>
+              <Btn onClick={leaveRoom} tone="ghost" full>Leave</Btn>
+            </div>
           </div>
         ) : (
           <>
@@ -978,18 +1155,19 @@ export default function App() {
             </div>
 
             {/* table log */}
-            <div className="rounded-xl p-3 mb-4 h-28 overflow-y-auto" style={{ background: "#0f0d0a", border: `1px solid ${C.panelLine}` }}>
+            <div className="glass-deep rounded-2xl p-3 mb-4 h-28 overflow-y-auto">
               {(room.log || []).slice(-8).map((l, i, arr) => (
                 <p key={i} style={{ color: i === arr.length - 1 ? C.parchment : C.muted, fontSize: 13 }} className="mb-1">{l}</p>
               ))}
             </div>
 
             {/* status / prompts — keyed so content animates in on each phase change */}
-            <div key={`${t.phase}:${t.action?.type || ""}:${t.block?.by || ""}:${pendingAction || ""}`} className="rounded-xl p-4 mb-4 coup-rise" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+            <div key={`${t.phase}:${t.action?.type || ""}:${t.block?.by || ""}:${pendingAction || ""}`} className="glass rounded-2xl p-4 mb-4 coup-rise">
+              {t.deadline && <TurnTimer deadline={t.deadline} now={now} />}
               {t.phase === "idle" && !pendingAction && (
                 myTurn ? (
                   <p className="text-center" style={{ color: C.gold, fontSize: 16, fontWeight: 700 }}>
-                    Your turn — pick an action below.
+                    Your turn — pick an action.
                   </p>
                 ) : (
                   <Waiting>Waiting for {currentPlayer?.name} to move</Waiting>
@@ -999,7 +1177,7 @@ export default function App() {
               {pendingAction && (
                 <div>
                   <p className="text-center mb-3" style={{ color: C.gold, fontSize: 15, fontWeight: 700 }}>
-                    {ACTIONS[pendingAction].label}: who's the target?
+                    {ACTIONS[pendingAction].label} — pick a target
                   </p>
                   <div className="flex flex-col gap-2 mb-2">
                     {otherAlive(room, myId).map((p) => (
@@ -1039,8 +1217,8 @@ export default function App() {
                         {ACTIONS[t.action.type].challengeable && (
                           <ChoiceBtn
                             tone="seal"
-                            title="Challenge — call the bluff"
-                            sub={`If ${actorName} can't show the ${claimedRole}, they lose a card. But if they CAN, you lose one.`}
+                            title="Challenge"
+                            sub={`No ${claimedRole}? They lose a card. Got it? You do.`}
                             onClick={() => refresh((r) => respondToAction(r, myId, "challenge"))}
                           />
                         )}
@@ -1049,14 +1227,14 @@ export default function App() {
                             key={role}
                             tone="ghost"
                             title={`Block as ${role}`}
-                            sub={`Claim the ${role} to stop this action. You may bluff — but you can be challenged.`}
+                            sub="Bluffing allowed — but you can be challenged."
                             onClick={() => refresh((r) => respondToAction(r, myId, "block", role))}
                           />
                         ))}
                         <ChoiceBtn
                           tone="gold"
-                          title="Allow it"
-                          sub="Let the action happen."
+                          title="Allow"
+                          sub="Let it happen."
                           onClick={() => refresh((r) => respondToAction(r, myId, "pass"))}
                         />
                       </div>
@@ -1064,10 +1242,10 @@ export default function App() {
                       <Waiting spectating>You're out of the game — spectating.</Waiting>
                     ) : iAmActor ? (
                       <Waiting>
-                        Waiting to see if anyone challenges or blocks{waitingNames.length ? ` (${waitingNames.join(", ")})` : ""}
+                        Anyone challenge or block? Waiting for {waitingNames.join(", ") || "others"}
                       </Waiting>
                     ) : (
-                      <Waiting>You allowed it — waiting for {waitingNames.join(", ") || "others"}</Waiting>
+                      <Waiting>Waiting for {waitingNames.join(", ") || "others"}</Waiting>
                     )}
                   </div>
                 );
@@ -1078,20 +1256,20 @@ export default function App() {
                 return (
                   <div>
                     <p className="text-center mb-3" style={{ color: C.parchment, fontSize: 14.5, lineHeight: 1.5 }}>
-                      <b style={{ color: C.gold }}>{blockerName}</b> claims the <b style={{ color: C.gold }}>{t.block.role}</b> to block your {ACTIONS[t.action.type].label}. Do you believe them?
+                      <b style={{ color: C.gold }}>{blockerName}</b> claims the <b style={{ color: C.gold }}>{t.block.role}</b> to block. Believe them?
                     </p>
                     {iAmActor ? (
                       <div className="flex flex-col gap-2 max-w-md mx-auto">
                         <ChoiceBtn
                           tone="seal"
-                          title="Challenge the block — call the bluff"
-                          sub={`If ${blockerName} can't show the ${t.block.role}, they lose a card and your action goes through. If they can, you lose one.`}
+                          title="Challenge the block"
+                          sub={`No ${t.block.role}? They lose a card, your action goes through.`}
                           onClick={() => refresh((r) => respondToBlock(r, myId, "challenge"))}
                         />
                         <ChoiceBtn
                           tone="gold"
-                          title="Accept the block"
-                          sub="Back down — your action is stopped."
+                          title="Accept"
+                          sub="Back down — action stopped."
                           onClick={() => refresh((r) => respondToBlock(r, myId, "accept"))}
                         />
                       </div>
@@ -1108,9 +1286,9 @@ export default function App() {
                 <div>
                   {t.pendingLoss.includes(myId) ? (
                     <div>
-                      <p className="text-center mb-1" style={{ color: C.sealBright, fontSize: 15, fontWeight: 700 }}>You must give up a card!</p>
+                      <p className="text-center mb-1" style={{ color: C.sealBright, fontSize: 15, fontWeight: 700 }}>You lose a card!</p>
                       <p className="text-center mb-3" style={{ color: C.muted, fontSize: 13 }}>
-                        Tap the card to sacrifice — it's revealed to everyone and out of the game.
+                        Tap one to give it up.
                       </p>
                       <div className="flex gap-3 justify-center flex-wrap">
                         {me.hand.map((c, i) => !c.revealed && (
@@ -1146,7 +1324,7 @@ export default function App() {
             </div>
 
             {/* my hand + actions */}
-            <div className="rounded-xl p-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+            <div className="glass rounded-2xl p-4">
               <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
                 <span className="flex items-center gap-1.5" style={{ color: C.parchment, fontSize: 14, fontWeight: 700 }}>
                   <Eye size={14} color={C.muted} /> Your secret cards
@@ -1156,7 +1334,7 @@ export default function App() {
                 </span>
               </div>
               <p className="mb-3" style={{ color: C.muted, fontSize: 12.5 }}>
-                {isAlive(me) ? "Only you can see these. Losing both means you're out." : "You're out — spectating."}
+                {isAlive(me) ? "Only you can see these." : "You're out — spectating."}
               </p>
               <div className="flex gap-3 mb-4 flex-wrap justify-center sm:justify-start">
                 {me?.hand.map((c, i) => (
@@ -1170,11 +1348,11 @@ export default function App() {
                 <div>
                   {me.coins >= 10 ? (
                     <p className="mb-2 text-center" style={{ color: C.sealBright, fontSize: 13, fontWeight: 600 }}>
-                      You have 10+ coins — the rules say you must launch a Coup.
+                      10+ coins — you must Coup.
                     </p>
                   ) : (
                     <p className="mb-2" style={{ color: C.muted, fontSize: 12.5 }}>
-                      Pick one action. Actions naming a role need that card — <b style={{ color: C.parchment }}>bluffing is allowed</b>.
+                      Role actions need that card — <b style={{ color: C.parchment }}>bluffing is allowed</b>.
                     </p>
                   )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1206,7 +1384,7 @@ export default function App() {
               <summary style={{ color: C.muted, fontSize: 12, cursor: "pointer" }}>Role reference</summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                 {ROLES.map((r) => (
-                  <div key={r} className="rounded-md px-3 py-2 flex items-center gap-2.5" style={{ background: C.feltDark, border: `1px solid ${C.panelLine}` }}>
+                  <div key={r} className="rounded-lg px-3 py-2 flex items-center gap-2.5" style={{ background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.09)" }}>
                     <img
                       src={ROLE_IMG[r]}
                       alt={r}
@@ -1241,7 +1419,7 @@ function ExchangePicker({ hand, drawn, onConfirm }) {
         Pick {keepCount} card{keepCount > 1 ? "s" : ""} to keep
       </p>
       <p className="text-center mb-3" style={{ color: C.muted, fontSize: 13 }}>
-        You drew {drawn.length} new card{drawn.length > 1 ? "s" : ""}. The rest go back into the deck — nobody sees them.
+        The rest go back in the deck.
       </p>
       <div className="flex gap-2 justify-center flex-wrap mb-3">
         {pool.map((role, i) => (

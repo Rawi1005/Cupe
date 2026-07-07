@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600..700&family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 html,
@@ -8,7 +9,28 @@ body,
 
 body {
   margin: 0;
-  background: #15130f;
+  background: #131118;
+}
+
+/* ---------------------------------------------------------------
+   Liquid-glass surfaces
+--------------------------------------------------------------- */
+.glass {
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03) 55%, rgba(255, 255, 255, 0.05));
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  backdrop-filter: blur(20px) saturate(1.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+.glass-deep {
+  background: rgba(0, 0, 0, 0.30);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.glass-deep:focus {
+  border-color: rgba(201, 162, 75, 0.55);
 }
 
 /* ---------------------------------------------------------------
@@ -89,6 +111,14 @@ body {
   85% { transform: translateX(220%) skewX(-16deg); }
   100% { transform: translateX(220%) skewX(-16deg); }
 }
+
+/* Hourglass wobble when the countdown gets urgent. */
+@keyframes coup-urgent {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-14deg); }
+  75% { transform: rotate(14deg); }
+}
+.coup-urgent { animation: coup-urgent 0.8s ease-in-out infinite; }
 
 .coup-rise { animation: coup-rise 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .coup-pop { animation: coup-pop 0.3s ease-out both; }
